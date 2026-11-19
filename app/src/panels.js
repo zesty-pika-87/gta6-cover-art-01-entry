@@ -1,79 +1,108 @@
-// Per-panel photo state: which photo fills each layout slot and how it is
-// cropped (zoom and offset). Nine slots cover the biggest layout; smaller
-// layouts simply use the first slots.
+// Cover Coast — the nine panel slots.
 //
-// v2: six sample photos, so the nine-slot default spreads them with no two
-// neighbours alike — horizontally or vertically — and gives every slot its
-// own slight zoom and offset, so the three photos that appear twice still
-// read as different framings rather than repeats.
+// The cover always has nine slots, filled from the photos in row-major
+// order. With the six sample photos the default order is
+// 0, 1, 2, 3, 4, 5, 1, 2, 3, so every row and every column holds three
+// different photos and no two neighbours — across or down — are the same.
+// Photos that appear twice do so as a different framing: the first six
+// slots get a gentle zoom (1.00 to 1.12) and a small offset, while the
+// three repeat slots get a tight zoom (1.32 to 1.42) with a hard offset
+// to the opposite side, so the repeat reads as a close-up of another
+// part of the photo.
+//
+// Shuffle rotates the assignment pattern instead of re-rolling it, so
+// the no-identical-neighbour rule survives every shuffle. A slot's crop
+// stays with the slot, not the photo.
 
-// Default assignment for a 3 x 3 grid over six photos. Row-major order:
-//   0 1 2
-//   3 4 5
-//   1 2 3
-// Every row and every column holds three different photos.
-const GRID9_PATTERN_6 = [0, 1, 2, 3, 4, 5, 1, 2, 3];
-// A gentle zoom per slot (1.00–1.12) plus a small offset, so repeated photos
-// are framed differently in each of their slots — and slots 6–8, which repeat
-// photos 1–3 in the nine-panel grids, get a much tighter zoom (1.32–1.42)
-// with a hard offset to the opposite side, so the repeat reads as a close-up
-// of a different part of the photo, not the same picture twice.
-const SLOT_ZOOM = [1.0, 1.08, 1.0, 1.12, 1.05, 1.0, 1.38, 1.32, 1.42];
-const SLOT_OX = [0, 0.12, -0.1, 0, -0.12, 0.1, -0.35, 0.3, -0.3];
-const SLOT_OY = [0, -0.1, 0.12, 0, 0.1, -0.12, -0.3, 0.35, 0.3];
+export const SLOT_COUNT = 9;
 
-export function defaultPanels(photoCount) {
-  const n = Math.max(1, photoCount || 1);
-  // With fewer than six photos the pattern still avoids identical neighbours
-  // wherever the count allows: the modulo keeps neighbours apart for n >= 3.
-  const pattern = GRID9_PATTERN_6;
-  return Array.from({ length: 9 }, (_, i) => ({
-    photo: pattern[i] % n,
-    zoom: SLOT_ZOOM[i],
-    ox: SLOT_OX[i],
-    oy: SLOT_OY[i],
+// The default order over six photos, row-major: rows [0,1,2], [3,4,5],
+// [1,2,3]; columns [0,3,1], [1,4,2], [2,5,3] — all different.
+export const DEFAULT_ORDER = [0, 1, 2, 3, 4, 5, 1, 2, 3];
+
+const REPEAT_ZOOM = [1.32, 1.37, 1.42];
+const REPEAT_OFFSET = [
+  [-0.45, 0.3],
+  [0.45, -0.3],
+  [-0.4, -0.35],
+];
+
+// The crop a slot starts with: gentle for slots 0–5, a tight close-up
+// with a hard offset for the repeat slots 6–8.
+export function defaultSlotCrop(slotIndex) {
+  if (slotIndex >= 6) {
+    const repeat = slotIndex - 6;
+    return { zoom: REPEAT_ZOOM[repeat], ox: REPEAT_OFFSET[repeat][0], oy: REPEAT_OFFSET[repeat][1] };
+  }
+  const zoom = 1 + (slotIndex % 3) * 0.06;
+  const ox = (((slotIndex * 37) % 5) - 2) * 0.05;
+  const oy = (((slotIndex * 53) % 5) - 2) * 0.05;
+  return { zoom, ox, oy };
+}
+
+// An assignment with no identical neighbours, for any photo count.
+// Six photos use the exact default order; other counts are built by a
+// greedy rotation that skips whatever sits left or above.
+export function buildAssignment(photoCount) {
+  if (photoCount <= 0) return new Array(SLOT_COUNT).fill(0);
+  if (photoCount === 6) return [...DEFAULT_ORDER];
+  const order = [];
+  let pointer = 0;
+  for (let slot = 0; slot < SLOT_COUNT; slot++) {
+    const left = slot % 3 === 0 ? -1 : order[slot - 1];
+    const above = slot < 3 ? -1 : order[slot - 3];
+    let candidate = pointer % photoCount;
+    let tries = 0;
+    while (photoCount >= 3 && (candidate === left || candidate === above) && tries < photoCount) {
+      pointer++;
+      candidate = pointer % photoCount;
+      tries++;
+    }
+    order.push(candidate);
+    pointer++;
+  }
+  return order;
+}
+
+export function createSlots(photoCount) {
+  const order = buildAssignment(photoCount);
+  return order.map((photo, index) => ({
+    photo,
+    ...defaultSlotCrop(index),
   }));
 }
 
-/**
- * Shuffles the photos across the nine slots with a fresh random rotation of
- * the six-photo pattern, keeping the no-identical-neighbours rule: the
- * pattern is rotated, never reordered, so rows and columns stay varied.
- * Returns new panels; the current crops are kept per slot.
- */
-export function shufflePanels(panels, photoCount) {
-  const n = Math.max(1, photoCount || 1);
-  const shift = 1 + Math.floor(Math.random() * (n - 1));
-  const next = panels.map((p) => ({ ...p }));
-  for (let i = 0; i < next.length; i++) {
-    next[i].photo = (GRID9_PATTERN_6[i] + shift) % n;
-  }
-  return next;
+export function assignPhoto(slots, slotIndex, photoIndex) {
+  if (!slots[slotIndex]) return;
+  slots[slotIndex].photo = photoIndex;
 }
 
-export function assignPhoto(panels, slotIdx, photoIdx) {
-  const next = panels.map((p) => ({ ...p }));
-  if (next[slotIdx]) next[slotIdx].photo = photoIdx;
-  return next;
+export function setCrop(slot, zoom, ox, oy) {
+  if (!slot) return;
+  slot.zoom = Math.max(1, Math.min(4, zoom));
+  slot.ox = Math.max(-1, Math.min(1, ox));
+  slot.oy = Math.max(-1, Math.min(1, oy));
 }
 
-export function setCrop(panels, slotIdx, patch) {
-  const next = panels.map((p) => ({ ...p }));
-  if (!next[slotIdx]) return next;
-  next[slotIdx] = { ...next[slotIdx], ...patch };
-  if (next[slotIdx].zoom < 1) next[slotIdx].zoom = 1;
-  if (next[slotIdx].zoom > 4) next[slotIdx].zoom = 4;
-  next[slotIdx].ox = Math.max(-1, Math.min(1, next[slotIdx].ox || 0));
-  next[slotIdx].oy = Math.max(-1, Math.min(1, next[slotIdx].oy || 0));
-  return next;
+export function resetCrop(slot) {
+  if (!slot) return;
+  slot.zoom = 1;
+  slot.ox = 0;
+  slot.oy = 0;
 }
 
-export function resetCrop(panels, slotIdx) {
-  const next = panels.map((p) => ({ ...p }));
-  if (next[slotIdx]) {
-    next[slotIdx].zoom = 1;
-    next[slotIdx].ox = 0;
-    next[slotIdx].oy = 0;
-  }
-  return next;
+let shuffleStep = 0;
+
+// Rotate the assignment pattern by 1 to (photoCount - 1) places. A
+// rotation keeps every neighbour pair distinct, so the cover never ends
+// up with the same photo twice side by side. Crops stay on their slots.
+export function shuffleSlots(slots, photoCount) {
+  if (!slots.length || photoCount <= 1) return slots;
+  const step = 1 + (shuffleStep % Math.max(1, photoCount - 1));
+  shuffleStep++;
+  const photos = slots.map((slot) => slot.photo);
+  slots.forEach((slot, index) => {
+    slot.photo = photos[(index + step) % slots.length];
+  });
+  return slots;
 }

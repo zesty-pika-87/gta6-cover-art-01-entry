@@ -1,135 +1,166 @@
-// Layouts for the cover: panel rects in pixels plus the title block, all derived
-// from the canvas size so one layout serves every export size (square, portrait,
-// landscape, story). Gutters are thin dark bands; the title block either floats
-// over a scrim at the foot or sits in its own halftone band.
+// Cover Coast — cover layouts.
 //
-// v2: seven layouts. `mosaic9` is new — a tall hero on the left with eight
-// cinematic strips on the right, so a nine-panel cover can show six different
-// photos without the 3 x 3 repetition. `grid9` now gives the panels the top
-// 78% (was 76%) and a slimmer 22% title band, so the lettering sits tighter
-// under a denser photo field.
+// Every layout is a pure function of the canvas size: it hands back the
+// photo panels, the title box and whether the title needs a scrim behind
+// it. All coordinates are pixels, so one description serves the preview
+// canvas and every export size alike.
+//
+// A panel is { x, y, w, h, rot, framed, dim }:
+//   x, y, w, h — the panel's box on the canvas
+//   rot        — rotation in radians about the panel's centre (0 = straight)
+//   framed     — draw it as a tilted polaroid snapshot, cream frame included
+//   dim        — dim the photo (a backdrop panel under other panels)
+// A title box is { x, y, w, h, align, band }:
+//   align — 'left' or 'center'
+//   band  — true when the title owns a band of its own at the foot;
+//           false when it sits on top of the photos over a scrim.
 
 export const LAYOUTS = [
-  { id: 'fullbleed', name: 'Full Bleed', slots: 1, blurb: 'One photo, edge to edge' },
-  { id: 'grid4', name: 'Four Panel', slots: 4, blurb: 'Classic 2 x 2 poster grid' },
-  { id: 'hero3', name: 'Hero + Three', slots: 4, blurb: 'Big hero left, three stacked right' },
-  { id: 'grid9', name: 'Nine Panel', slots: 9, blurb: 'Cover grid with a title band' },
-  { id: 'mosaic9', name: 'Mosaic Nine', slots: 9, blurb: 'Tall hero + eight strips, six photos' },
-  { id: 'tilted', name: 'Tilted Snapshots', slots: 3, blurb: 'Polaroid snaps, askew' },
-  { id: 'story', name: 'Story Stack', slots: 3, blurb: 'Tall stack for 9:16 stories' },
+  { id: 'fullbleed', name: 'Full Bleed', blurb: 'One photo edge to edge, title low on the left.' },
+  { id: 'four', name: 'Four Panel', blurb: 'A 2 by 2 grid with a centred title at the foot.' },
+  { id: 'hero3', name: 'Hero + Three', blurb: 'A tall hero on the left, three stacked panels right.' },
+  { id: 'grid9', name: 'Nine Panel', blurb: 'A 3 by 3 grid over a bold title band.' },
+  { id: 'mosaic', name: 'Mosaic Nine', blurb: 'A tall hero plus cinematic strips, title band below.' },
+  { id: 'tilted', name: 'Tilted Snapshots', blurb: 'Polaroids scattered over a dimmed backdrop.' },
+  { id: 'story', name: 'Story Stack', blurb: 'A wide top panel, two below, title band at the foot.' },
 ];
 
-/**
- * Panel and title geometry for a layout at W x H.
- * Returns { panels: [{x,y,w,h,rot,frame}], title: {x,y,w,h,align,band}, scrim: bool }.
- * `panels` are drawn in order; `rot` is radians about the panel centre.
- */
-export function layoutPanels(id, W, H) {
-  const g = Math.max(2, Math.round(Math.min(W, H) * 0.012));
-  const band = (y, h) => ({ x: 0, y, w: W, h, align: 'center', band: true });
-  const foot = (y, h, align = 'center') => ({ x: W * 0.05, y, w: W * 0.9, h, align, band: false });
+export function layoutById(id) {
+  return LAYOUTS.find((entry) => entry.id === id) || null;
+}
 
+// The gap between panels: at least 2 px, or 1.2% of the canvas's short side.
+export function panelGutter(width, height) {
+  return Math.max(2, Math.round(Math.min(width, height) * 0.012));
+}
+
+function gridPanels(area, cols, rows, gutter) {
+  const cells = [];
+  const cellW = (area.w - gutter * (cols - 1)) / cols;
+  const cellH = (area.h - gutter * (rows - 1)) / rows;
+  for (let row = 0; row < rows; row++) {
+    for (let col = 0; col < cols; col++) {
+      cells.push({
+        x: area.x + col * (cellW + gutter),
+        y: area.y + row * (cellH + gutter),
+        w: cellW,
+        h: cellH,
+        rot: 0,
+        framed: false,
+      });
+    }
+  }
+  return cells;
+}
+
+function titleBand(width, height, topFraction) {
+  return {
+    x: 0,
+    y: height * topFraction,
+    w: width,
+    h: height * (1 - topFraction),
+    align: 'center',
+    band: true,
+  };
+}
+
+function fullBleedPanels(width, height) {
+  return {
+    panels: [{ x: 0, y: 0, w: width, h: height, rot: 0, framed: false }],
+    title: { x: width * 0.05, y: height * 0.66, w: width * 0.9, h: height * 0.28, align: 'left', band: false },
+    scrim: true,
+  };
+}
+
+function fourPanelPanels(width, height, gutter) {
+  return {
+    panels: gridPanels({ x: gutter, y: gutter, w: width - 2 * gutter, h: height - 2 * gutter }, 2, 2, gutter),
+    title: { x: width * 0.05, y: height * 0.7, w: width * 0.9, h: height * 0.28, align: 'center', band: false },
+    scrim: true,
+  };
+}
+
+function heroThreePanels(width, height, gutter) {
+  const heroW = width * 0.64 - gutter * 1.5;
+  const rightX = width * 0.64 + gutter * 0.5;
+  const rightW = width - gutter - rightX;
+  const right = gridPanels({ x: rightX, y: gutter, w: rightW, h: height - 2 * gutter }, 1, 3, gutter);
+  return {
+    panels: [{ x: gutter, y: gutter, w: heroW, h: height - 2 * gutter, rot: 0, framed: false }, ...right],
+    title: { x: gutter, y: height * 0.72, w: width * 0.58, h: height * 0.26, align: 'left', band: false },
+    scrim: true,
+  };
+}
+
+function ninePanelPanels(width, height, gutter) {
+  const panels = gridPanels(
+    { x: gutter, y: gutter, w: width - 2 * gutter, h: height * 0.78 - 2 * gutter },
+    3,
+    3,
+    gutter,
+  );
+  return { panels, title: titleBand(width, height, 0.78), scrim: false };
+}
+
+function mosaicNinePanels(width, height, gutter) {
+  const heroW = width * 0.4 - gutter * 1.5;
+  const rightX = width * 0.4 + gutter * 0.5;
+  const rightW = width - gutter - rightX;
+  const strips = gridPanels(
+    { x: rightX, y: gutter, w: rightW, h: height * 0.78 - 2 * gutter },
+    2,
+    4,
+    gutter,
+  );
+  const panels = [{ x: gutter, y: gutter, w: heroW, h: height * 0.78 - 2 * gutter, rot: 0, framed: false }, ...strips];
+  return { panels, title: titleBand(width, height, 0.78), scrim: false };
+}
+
+function tiltedSnapshotPanels(width, height) {
+  return {
+    panels: [
+      { x: 0, y: 0, w: width, h: height, rot: 0, framed: false, dim: true },
+      { x: width * 0.06, y: height * 0.05, w: width * 0.3, h: height * 0.34, rot: 0.07, framed: true },
+      { x: width * 0.3, y: height * 0.2, w: width * 0.42, h: height * 0.48, rot: -0.05, framed: true },
+      { x: width * 0.62, y: height * 0.52, w: width * 0.3, h: height * 0.34, rot: 0.08, framed: true },
+    ],
+    title: { x: width * 0.05, y: height * 0.76, w: width * 0.62, h: height * 0.22, align: 'left', band: false },
+    scrim: true,
+  };
+}
+
+function storyStackPanels(width, height, gutter) {
+  const bottomW = (width - 3 * gutter) / 2;
+  return {
+    panels: [
+      { x: gutter, y: gutter, w: width - 2 * gutter, h: height * 0.52 - 2 * gutter, rot: 0, framed: false },
+      { x: gutter, y: height * 0.53, w: bottomW, h: height * 0.2, rot: 0, framed: false },
+      { x: gutter + bottomW + gutter, y: height * 0.53, w: bottomW, h: height * 0.2, rot: 0, framed: false },
+    ],
+    title: titleBand(width, height, 0.76),
+    scrim: false,
+  };
+}
+
+// The layout for a canvas of this size. An unknown id falls back to Nine Panel.
+export function layoutPanels(id, width, height) {
+  const gutter = panelGutter(width, height);
   switch (id) {
     case 'fullbleed':
-      return {
-        panels: [{ x: 0, y: 0, w: W, h: H, rot: 0, frame: false }],
-        title: foot(H * 0.66, H * 0.28, 'left'),
-        scrim: true,
-      };
-    case 'grid4': {
-      const cw = (W - g) / 2;
-      const ch = (H - g) / 2;
-      return {
-        panels: [
-          { x: 0, y: 0, w: cw, h: ch, rot: 0, frame: false },
-          { x: cw + g, y: 0, w: cw, h: ch, rot: 0, frame: false },
-          { x: 0, y: ch + g, w: cw, h: ch, rot: 0, frame: false },
-          { x: cw + g, y: ch + g, w: cw, h: ch, rot: 0, frame: false },
-        ],
-        title: foot(H * 0.70, H * 0.24),
-        scrim: true,
-      };
-    }
-    case 'hero3': {
-      const hw = Math.round(W * 0.64);
-      const rw = W - hw - g;
-      const rh = (H - 2 * g) / 3;
-      return {
-        panels: [
-          { x: 0, y: 0, w: hw, h: H, rot: 0, frame: false },
-          { x: hw + g, y: 0, w: rw, h: rh, rot: 0, frame: false },
-          { x: hw + g, y: rh + g, w: rw, h: rh, rot: 0, frame: false },
-          { x: hw + g, y: 2 * (rh + g), w: rw, h: rh, rot: 0, frame: false },
-        ],
-        title: { x: W * 0.04, y: H * 0.72, w: W * 0.58, h: H * 0.22, align: 'left', band: false },
-        scrim: true,
-      };
-    }
-    case 'grid9': {
-      // The nine panels fill the top 78%; the title band owns the foot, so no
-      // panel is hidden behind the lettering. With six sample photos the
-      // default assignment (see panels.js) never puts the same photo twice
-      // next to itself, so the grid reads as nine different moments.
-      const cw = (W - 2 * g) / 3;
-      const ch = (H * 0.78 - 2 * g) / 3;
-      const panels = [];
-      for (let r = 0; r < 3; r++) {
-        for (let c = 0; c < 3; c++) {
-          panels.push({ x: c * (cw + g), y: r * (ch + g), w: cw, h: ch, rot: 0, frame: false });
-        }
-      }
-      return { panels, title: band(H * 0.78, H * 0.22), scrim: false };
-    }
-    case 'mosaic9': {
-      // Mosaic nine: a tall hero panel takes the left 40% of the top 78%,
-      // the right 60% is eight cinematic strips (2 columns x 4 rows), and
-      // the title band owns the foot. Nine slots, six photos, no two
-      // neighbours alike — the densest cover in the app.
-      const top = H * 0.78;
-      const heroW = Math.round(W * 0.40);
-      const stripW = (W - heroW - 2 * g) / 2;
-      const stripH = (top - 3 * g) / 4;
-      const panels = [{ x: 0, y: 0, w: heroW, h: top, rot: 0, frame: false }];
-      for (let r = 0; r < 4; r++) {
-        for (let c = 0; c < 2; c++) {
-          panels.push({
-            x: heroW + g + c * (stripW + g),
-            y: r * (stripH + g),
-            w: stripW,
-            h: stripH,
-            rot: 0,
-            frame: false,
-          });
-        }
-      }
-      return { panels, title: band(top, H - top), scrim: false };
-    }
+      return fullBleedPanels(width, height);
+    case 'four':
+      return fourPanelPanels(width, height, gutter);
+    case 'hero3':
+      return heroThreePanels(width, height, gutter);
+    case 'grid9':
+      return ninePanelPanels(width, height, gutter);
+    case 'mosaic':
+      return mosaicNinePanels(width, height, gutter);
     case 'tilted':
-      return {
-        panels: [
-          { x: 0, y: 0, w: W, h: H, rot: 0, frame: false },
-          { x: W * 0.05, y: H * 0.05, w: W * 0.30, h: H * 0.30, rot: 0.10, frame: true },
-          { x: W * 0.20, y: H * 0.16, w: W * 0.60, h: H * 0.58, rot: -0.06, frame: true },
-          { x: W * 0.65, y: H * 0.62, w: W * 0.30, h: H * 0.30, rot: 0.09, frame: true },
-        ],
-        title: foot(H * 0.76, H * 0.20, 'left'),
-        scrim: true,
-      };
-    case 'story': {
-      const tw = (W - g) / 2;
-      const th = H * 0.20;
-      return {
-        panels: [
-          { x: 0, y: 0, w: W, h: H * 0.52, rot: 0, frame: false },
-          { x: 0, y: H * 0.53, w: tw, h: th, rot: 0, frame: false },
-          { x: tw + g, y: H * 0.53, w: tw, h: th, rot: 0, frame: false },
-          { x: 0, y: H * 0.53, w: 0, h: 0, rot: 0, frame: false },
-        ].filter((p) => p.w > 0),
-        title: band(H * 0.76, H * 0.24),
-        scrim: false,
-      };
-    }
+      return tiltedSnapshotPanels(width, height);
+    case 'story':
+      return storyStackPanels(width, height, gutter);
     default:
-      return layoutPanels('grid9', W, H);
+      return ninePanelPanels(width, height, gutter);
   }
 }

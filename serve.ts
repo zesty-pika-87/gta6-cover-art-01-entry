@@ -1,27 +1,23 @@
-// A tiny static server for app/ (Node 22, standard library only), so an entry can be tried
-// locally without a build step: `node serve.ts` serves app/ on http://localhost:8080.
-// It sends the MIME types an offline web app needs, refuses any path outside app/, and otherwise
-// does nothing clever: this is a development convenience, not a web server for the internet.
+// Cover Coast — a tiny static server for app/.
 //
-// v2: `--host` picks the bind address (default 127.0.0.1), every request is
-// logged to stderr with its status so a missing sample or font shows up at
-// once, and HEAD requests are answered with headers only.
-import { createReadStream, statSync } from 'node:fs';
+// Serves the app folder on 127.0.0.1:8080 by default, so the cover maker
+// can be tried in a desktop browser with no build step:
+//   node serve.ts
+//   open http://localhost:8080
+//
+// Flags: --port <number>, --host <address>. Paths that escape the app
+// folder are refused with 403, missing files answer 404, every request
+// is logged to stderr with its status, HEAD answers headers only, and
+// responses carry Cache-Control: no-store so a fresh build is never
+// hidden behind a stale copy.
+
 import { createServer } from 'node:http';
+import { readFile, stat } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const root = resolve(fileURLToPath(new URL('./app', import.meta.url)));
-const args = process.argv.slice(2);
-const flagValue = (flag, fallback) => {
-  const i = args.indexOf(flag);
-  return i === -1 || i + 1 >= args.length ? fallback : args[i + 1];
-};
-const requestedPort = Number(flagValue('--port', '8080'));
-const port = Number.isInteger(requestedPort) && requestedPort > 0 && requestedPort < 65536 ? requestedPort : 8080;
-const host = flagValue('--host', '127.0.0.1');
-
-const MIME: Record<string, string> = {
+const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
   '.mjs': 'text/javascript; charset=utf-8',
@@ -38,52 +34,92 @@ const MIME: Record<string, string> = {
   '.woff': 'font/woff',
   '.ttf': 'font/ttf',
   '.otf': 'font/otf',
-  '.bin': 'application/octet-stream',
   '.wasm': 'application/wasm',
-  '.wav': 'audio/wav',
   '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
   '.ogg': 'audio/ogg',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
   '.txt': 'text/plain; charset=utf-8',
 };
 
-createServer((request, response) => {
-  const url = new URL(request.url ?? '/', 'http://localhost');
-  let pathname: string;
+function parseFlags(argv) {
+  const flags = { port: 8080, host: '127.0.0.1' };
+  for (let i = 0; i < argv.length; i++) {
+    if (argv[i] === '--port' && argv[i + 1]) {
+      flags.port = Number(argv[i + 1]);
+      i++;
+    } else if (argv[i] === '--host' && argv[i + 1]) {
+      flags.host = argv[i + 1];
+      i++;
+    }
+  }
+  return flags;
+}
+
+function mimeFor(filePath) {
+  return MIME_TYPES[extname(filePath).toLowerCase()] || 'application/octet-stream';
+}
+
+const cwdApp = resolve(process.cwd(), 'app');
+const scriptDir = resolve(fileURLToPath(new URL('.', import.meta.url)));
+const root = existsSync(cwdApp) ? cwdApp : resolve(scriptDir, 'app');
+
+const { port, host } = parseFlags(process.argv.slice(2));
+
+const server = createServer(async (request, response) => {
+  const method = request.method || 'GET';
+  const url = new URL(request.url || '/', `http://${host}:${port}`);
+  const decoded = decodeURIComponent(url.pathname);
+  const target = normalize(join(root, decoded === '/' ? 'index.html' : decoded));
+  const inside = target === root || target.startsWith(root + sep);
+
+  const log = (status) => {
+    process.stderr.write(`${method} ${url.pathname} ${status}\n`);
+  };
+
+  if (!inside) {
+    response.writeHead(403, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+    response.end('Forbidden\n');
+    log(403);
+    return;
+  }
+
+  let info;
   try {
-    pathname = decodeURIComponent(url.pathname);
+    info = await stat(target);
   } catch {
-    response.writeHead(400).end('bad request');
-    console.error(`${request.method} ${url.pathname} -> 400`);
+    info = null;
+  }
+  if (!info || !info.isFile()) {
+    response.writeHead(404, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+    response.end('Not found\n');
+    log(404);
     return;
   }
-  if (pathname.endsWith('/')) pathname += 'index.html';
-  const file = resolve(join(root, normalize(pathname)));
-  if (file !== root && !file.startsWith(root + sep)) {
-    response.writeHead(403).end('forbidden');
-    console.error(`${request.method} ${url.pathname} -> 403`);
-    return;
-  }
-  let size: number;
+
   try {
-    const stats = statSync(file);
-    if (!stats.isFile()) throw new Error('not a file');
-    size = stats.size;
-  } catch {
-    response.writeHead(404).end('not found');
-    console.error(`${request.method} ${url.pathname} -> 404`);
-    return;
+    const body = await readFile(target);
+    const headers = {
+      'content-type': mimeFor(target),
+      'content-length': body.length,
+      'cache-control': 'no-store',
+    };
+    response.writeHead(200, headers);
+    if (method === 'HEAD') {
+      response.end();
+    } else {
+      response.end(body);
+    }
+    log(200);
+  } catch (error) {
+    response.writeHead(500, { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' });
+    response.end('Server error\n');
+    log(500);
+    process.stderr.write(`${String(error)}\n`);
   }
-  response.writeHead(200, {
-    'content-type': MIME[extname(file).toLowerCase()] ?? 'application/octet-stream',
-    'content-length': size,
-    'cache-control': 'no-store',
-  });
-  console.error(`${request.method} ${url.pathname} -> 200 (${size} bytes)`);
-  if (request.method === 'HEAD') {
-    response.end();
-    return;
-  }
-  createReadStream(file).pipe(response);
-}).listen(port, host, () => {
-  console.log(`app/ is on http://${host}:${port}`);
+});
+
+server.listen(port, host, () => {
+  process.stderr.write(`Cover Coast serving ${root} at http://${host}:${port}/\n`);
 });

@@ -1,120 +1,136 @@
-// Poster effects: film grain, vignette and a halftone dot field for the title
-// band. All of them are resolution aware (they scale with the canvas) so the
-// small preview and the full-size export look like the same poster.
+// Cover Coast — poster effects.
 //
-// v2: the grain is now deterministic — a seeded generator replaces
-// Math.random, so the same cover renders byte-identical grain in the preview
-// and in every export size. New: `rays`, a faint sunburst behind the title
-// band that lifts the lettering off the photo field.
+// Film grain (deterministic: the same seed every time, so the preview and
+// every export size carry identical grain), a vignette, halftone dots,
+// sunburst rays and the thin white poster frame. Everything here is drawn
+// on top of the art and lettering, never under it.
 
-/** Tiny seeded PRNG (mulberry32) so grain is reproducible across renders. */
-function mulberry32(seed) {
-  let a = seed >>> 0;
-  return () => {
-    a |= 0;
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+const GRAIN_SEED = 20261119;
+const GRAIN_TILE = 128;
+const GRAIN_OPACITY = 0.1;
+const VIGNETTE_STRENGTH = 0.3;
+const HALFTONE_OPACITY = 0.16;
+const SUNBURST_RAYS = 9;
+const SUNBURST_OPACITY = 0.1;
+
+// A small seeded generator in the mulberry32 style: the same sequence on
+// every run, in every browser, at every size.
+export function seededRandom(seed) {
+  let state = seed >>> 0;
+  return function next() {
+    state |= 0;
+    state = (state + 0x6d2b79f5) | 0;
+    let value = Math.imul(state ^ (state >>> 15), 1 | state);
+    value = (value + Math.imul(value ^ (value >>> 7), 61 | value)) ^ value;
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
   };
 }
 
-let noise = null;
+let grainTile = null;
 
-function noiseCanvas() {
-  if (noise) return noise;
-  const rand = mulberry32(0xC0FFEE);
-  noise = document.createElement('canvas');
-  noise.width = 128;
-  noise.height = 128;
-  const c = noise.getContext('2d');
-  const img = c.createImageData(128, 128);
-  for (let i = 0; i < img.data.length; i += 4) {
-    const v = Math.floor(rand() * 256);
-    img.data[i] = v;
-    img.data[i + 1] = v;
-    img.data[i + 2] = v;
-    img.data[i + 3] = 255;
+// One 128 by 128 noise tile, built once from the fixed seed.
+export function grainNoiseTile() {
+  if (grainTile) return grainTile;
+  const tile = document.createElement('canvas');
+  tile.width = GRAIN_TILE;
+  tile.height = GRAIN_TILE;
+  const tileCtx = tile.getContext('2d');
+  const image = tileCtx.createImageData(GRAIN_TILE, GRAIN_TILE);
+  const random = seededRandom(GRAIN_SEED);
+  for (let i = 0; i < image.data.length; i += 4) {
+    const shade = Math.floor(random() * 256);
+    image.data[i] = shade;
+    image.data[i + 1] = shade;
+    image.data[i + 2] = shade;
+    image.data[i + 3] = 255;
   }
-  c.putImageData(img, 0, 0);
-  return noise;
+  tileCtx.putImageData(image, 0, 0);
+  grainTile = tile;
+  return grainTile;
 }
 
-/** Film grain tiled over the canvas. `amount` 0..1. */
-export function grain(ctx, W, H, amount = 0.10) {
-  if (amount <= 0) return;
-  const pattern = ctx.createPattern(noiseCanvas(), 'repeat');
+// Repeat the noise tile over the whole canvas as an overlay at 10%
+// opacity. Deterministic, so two renders of the same cover match pixel
+// for pixel.
+export function applyGrain(ctx, width, height) {
+  const pattern = ctx.createPattern(grainNoiseTile(), 'repeat');
+  if (!pattern) return;
   ctx.save();
-  ctx.globalAlpha = amount;
+  ctx.globalAlpha = GRAIN_OPACITY;
   ctx.globalCompositeOperation = 'overlay';
   ctx.fillStyle = pattern;
-  ctx.fillRect(0, 0, W, H);
+  ctx.fillRect(0, 0, width, height);
   ctx.restore();
 }
 
-/** Darkened corners that pull the eye to the middle. */
-export function vignette(ctx, W, H, strength = 0.32) {
-  if (strength <= 0) return;
-  const r = Math.hypot(W, H) / 2;
-  const grad = ctx.createRadialGradient(W / 2, H / 2, r * 0.45, W / 2, H / 2, r);
-  grad.addColorStop(0, 'rgba(0,0,0,0)');
-  grad.addColorStop(1, `rgba(5,0,12,${strength})`);
+// A radial falloff: clear in the middle, dark at the corners.
+export function applyVignette(ctx, width, height) {
+  const centreX = width / 2;
+  const centreY = height * 0.45;
+  const inner = Math.min(width, height) * 0.35;
+  const outer = Math.max(width, height) * 0.75;
+  const gradient = ctx.createRadialGradient(centreX, centreY, inner, centreX, centreY, outer);
+  gradient.addColorStop(0, 'rgba(10, 4, 20, 0)');
+  gradient.addColorStop(1, `rgba(10, 4, 20, ${VIGNETTE_STRENGTH})`);
   ctx.save();
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, width, height);
   ctx.restore();
 }
 
-/** Halftone dot field across a band, denser toward its foot. */
-export function halftone(ctx, box, color = '#ff7a3d', alpha = 0.16) {
-  const spacing = Math.max(7, Math.round(box.w / 56));
-  const rows = Math.floor(box.h / spacing);
-  const cols = Math.floor(box.w / spacing);
+// A grid of orange dots across a band, at least 7 px apart, growing
+// toward the foot of the band, at 16% opacity.
+export function drawHalftone(ctx, band) {
+  const spacing = Math.max(7, Math.min(band.w, band.h) * 0.09);
+  const top = band.y + band.h * 0.5;
+  const bottom = band.y + band.h;
   ctx.save();
-  ctx.fillStyle = color;
-  ctx.globalAlpha = alpha;
-  for (let r = 0; r <= rows; r++) {
-    for (let c = 0; c <= cols; c++) {
-      const f = 0.35 + 0.65 * (r / Math.max(1, rows));
-      const rad = spacing * 0.30 * f;
+  ctx.globalAlpha = HALFTONE_OPACITY;
+  ctx.fillStyle = '#ff8a3c';
+  for (let y = top + spacing / 2; y < bottom; y += spacing) {
+    const depth = (y - top) / Math.max(1, bottom - top);
+    const radius = spacing * (0.14 + depth * 0.24);
+    for (let x = band.x + spacing / 2; x < band.x + band.w; x += spacing) {
       ctx.beginPath();
-      ctx.arc(box.x + c * spacing + spacing / 2, box.y + r * spacing + spacing / 2, rad, 0, Math.PI * 2);
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
       ctx.fill();
     }
   }
   ctx.restore();
 }
 
-/**
- * Faint sunburst rays fanning down from the top centre of a band, drawn
- * under the title so the lettering reads against a lighter fan.
- */
-export function rays(ctx, box, color = '#ff9d5c', alpha = 0.10) {
-  const cx = box.x + box.w / 2;
-  const cy = box.y - box.h * 0.35;
-  const reach = Math.hypot(box.w, box.h);
-  const count = 9;
+// Nine fan rays from a point just above the middle of the band, orange
+// at 10% opacity, so the title band reads as a sunrise.
+export function drawSunburst(ctx, band) {
+  const apexX = band.x + band.w / 2;
+  const apexY = band.y - band.h * 0.35;
+  const leftAngle = Math.atan2(band.y + band.h - apexY, band.x - apexX);
+  const rightAngle = Math.atan2(band.y + band.h - apexY, band.x + band.w - apexX);
+  const spread = rightAngle - leftAngle;
+  const step = spread / SUNBURST_RAYS;
+  const reach = Math.hypot(band.w, band.h * 2);
   ctx.save();
-  ctx.globalAlpha = alpha;
-  ctx.fillStyle = color;
-  for (let i = 0; i < count; i++) {
-    const a0 = Math.PI * (0.15 + (0.70 * i) / count);
-    const a1 = a0 + Math.PI * 0.035;
+  ctx.globalAlpha = SUNBURST_OPACITY;
+  ctx.fillStyle = '#ff8a3c';
+  for (let ray = 0; ray < SUNBURST_RAYS; ray++) {
+    const start = leftAngle + step * ray + step * 0.12;
+    const end = leftAngle + step * (ray + 1) - step * 0.12;
     ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.arc(cx, cy, reach, a0, a1);
+    ctx.moveTo(apexX, apexY);
+    ctx.lineTo(apexX + Math.cos(start) * reach, apexY + Math.sin(start) * reach);
+    ctx.lineTo(apexX + Math.cos(end) * reach, apexY + Math.sin(end) * reach);
     ctx.closePath();
     ctx.fill();
   }
   ctx.restore();
 }
 
-/** Thin poster frame around the whole cover. */
-export function posterFrame(ctx, W, H, color = 'rgba(255,255,255,0.85)') {
-  const w = Math.max(3, Math.round(Math.min(W, H) * 0.008));
+// The thin white poster frame: about 0.8% of the canvas's short side.
+export function drawPosterFrame(ctx, width, height) {
+  const line = Math.max(2, Math.min(width, height) * 0.008);
   ctx.save();
-  ctx.strokeStyle = color;
-  ctx.lineWidth = w;
-  ctx.strokeRect(w / 2, w / 2, W - w, H - w);
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.92)';
+  ctx.lineWidth = line;
+  ctx.strokeRect(line / 2, line / 2, width - line, height - line);
   ctx.restore();
 }

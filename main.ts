@@ -1,57 +1,79 @@
-// A working gta6-cover-art-01 entry (Node 22, standard library only): the app is this directory's app/ folder, plain
-// static files a desktop browser loads offline (app/index.html and its ES modules, no library and no network
-// request), and the program hands it in. It copies app/ and screenshots/ from beside this file to /output and writes
-// /output/dossier.json, the summary the judge reads, with the vendored make.fun library.
+// Cover Coast — the entrypoint.
 //
-// Cover Coast v2: a GTA-style cover maker. Seven layouts (full-bleed, four-panel grid, hero-and-three, nine-panel grid
-// with a halftone title band below the panels, mosaic nine with a tall hero and eight strips, tilted polaroid snapshots,
-// story stack), six gradient-map colour grades (Vice Sunset, Neon Nights, Palm Dusk, Magenta Heat, Teal Noir, Golden Hour),
-// sunset-gradient Anton title lettering that wraps to two lines instead of shrinking, neon Pacifico subtitle, ribbon badge
-// and five-star heat meter, deterministic grain, sunburst and vignette, per-panel crop and zoom, shuffle, undo/redo, and PNG
-// export at 1080x1080, 1080x1350, 1920x1080 and 1080x1920, named after the cover title. Fonts are OFL files under app/fonts/;
-// the six sample photos (app/samples/) are free to use, and the nine-panel grids give the three photos that must repeat
-// a much tighter, opposite-side crop (see panels.js) so a repeat reads as a different framing. Build your own GTA-style
-// cover maker in its place, put your 3 or 4 PNG or JPEG screenshots in screenshots/ (the first by name is the cover — here
-// the 1920x1080 nine-panel cover) and run it.
+// Copies app/ and screenshots/ from this repository into the output
+// directory and writes dossier.json there, built by buildDossier from
+// vendor/makefun-app.ts. Run it from the repository root:
 //
-// Serve it locally with `node serve.ts`, then open http://localhost:8080.
-// Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
-//   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
+//   MAKEFUN_OUTPUT_DIR=out node main.ts
+//
+// The output directory defaults to /output when MAKEFUN_OUTPUT_DIR is
+// not set. The program runs twice over the same inputs and writes the
+// same bytes both times.
+//
+// Preflight: the screenshots must be exactly 4, each at most 256 KiB —
+// anything else fails loudly instead of handing in a bundle the gate
+// would refuse.
 
-import { cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { cp, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-app.ts';
 
-const here = fileURLToPath(new URL('.', import.meta.url));
-const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+const MAX_SCREENSHOTS = 4;
+const MAX_SCREENSHOT_BYTES = 256 * 1024;
+const TEXT_MAX_BYTES = 163840;
+const APP_MAX_FILES = 993;
+const APP_MAX_BYTES = 48 * 1024 * 1024;
+const APP_PATH_MAX_BYTES = 1000;
 
-// Preflight: the entry is refused without 4 screenshots inside the caps, so
-// fail loudly here instead of handing in a bundle the scorer would reject.
-const shotDir = join(here, 'screenshots');
-const shots = readdirSync(shotDir).filter((f) => /\.(png|jpe?g)$/i.test(f)).sort();
-if (shots.length !== 4) throw new Error(`expected 4 screenshots, found ${shots.length}: ${shots.join(', ')}`);
-for (const f of shots) {
-  const size = statSync(join(shotDir, f)).size;
-  if (size > 262144) throw new Error(`screenshot ${f} is ${size} bytes, over the 256 KiB cap`);
+async function checkScreenshots(screenshotsDir) {
+  const names = (await readdir(screenshotsDir)).filter((name) => !name.startsWith('.')).sort();
+  if (names.length !== MAX_SCREENSHOTS) {
+    throw new Error(
+      `Preflight failed: screenshots/ holds ${names.length} image(s), expected exactly ${MAX_SCREENSHOTS}.`,
+    );
+  }
+  for (const name of names) {
+    const info = await stat(join(screenshotsDir, name));
+    if (!info.isFile()) {
+      throw new Error(`Preflight failed: screenshots/${name} is not a regular file.`);
+    }
+    if (info.size > MAX_SCREENSHOT_BYTES) {
+      throw new Error(
+        `Preflight failed: screenshots/${name} is ${info.size} bytes, over the ${MAX_SCREENSHOT_BYTES} byte cap.`,
+      );
+    }
+  }
+  return names;
 }
 
-mkdirSync(out, { recursive: true });
-cpSync(join(here, 'app'), join(out, 'app'), { recursive: true });
-mkdirSync(join(out, 'screenshots'), { recursive: true });
-if (existsSync(join(here, 'screenshots'))) cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
+async function main() {
+  const repoRoot = dirname(fileURLToPath(import.meta.url));
+  const outDir = resolve(process.env.MAKEFUN_OUTPUT_DIR || '/output');
 
-// The scorer's own caps (reference/gate.json): only text_max_bytes shapes the bytes; the others refuse an entry the
-// scorer would refuse (more than 4 screenshots or one over 256 KiB; more than 993 files in app/ or 48 MiB of app
-// files, in all, or a path under app/ over 1000 bytes: app/ counts beside /output's own 1000-entry cap, its
-// screenshots/ and dossier.json).
-writeFileSync(
-  join(out, 'dossier.json'),
-  buildDossier(out, {
-    text_max_bytes: 163840,
-    screenshots: { max: 4, max_bytes: 262144 },
-    app_max_files: 993,
-    app_max_bytes: 50331648,
-    app_path_max_bytes: 1000,
-  }),
-);
+  await rm(outDir, { recursive: true, force: true });
+  await mkdir(outDir, { recursive: true });
+  await cp(join(repoRoot, 'app'), join(outDir, 'app'), { recursive: true });
+  await cp(join(repoRoot, 'screenshots'), join(outDir, 'screenshots'), { recursive: true });
+
+  const shotNames = await checkScreenshots(join(outDir, 'screenshots'));
+
+  const dossier = buildDossier(outDir, {
+    text_max_bytes: TEXT_MAX_BYTES,
+    screenshots: { max: MAX_SCREENSHOTS, max_bytes: MAX_SCREENSHOT_BYTES },
+    app_max_files: APP_MAX_FILES,
+    app_max_bytes: APP_MAX_BYTES,
+    app_path_max_bytes: APP_PATH_MAX_BYTES,
+  });
+  await writeFile(join(outDir, 'dossier.json'), dossier);
+
+  process.stdout.write(
+    `Cover Coast: wrote ${outDir}/dossier.json (${dossier.length} bytes) ` +
+      `from app/ and ${shotNames.length} screenshots.\n`,
+  );
+}
+
+main().catch((error) => {
+  process.stderr.write(`Cover Coast failed: ${error.message}\n`);
+  process.exitCode = 1;
+});

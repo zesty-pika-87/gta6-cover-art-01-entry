@@ -1,379 +1,458 @@
-// Wires the Cover Coast editor: photos in, layout and grade picked, words typed,
-// cover exported. Drag a panel to move its photo, scroll to zoom it, click a
-// thumbnail to fill the selected panel, or Shuffle for a fresh photo spread
-// across the panels. A `?shot=` query sets up a fixed scene for a screenshot
-// instead (./shots.js). Six sample photos ship with the app; any of your own
-// photos can be added on top.
+// Cover Coast — the editor.
+//
+// Wires the controls to the cover renderer: the photo list, the nine
+// panel slots, the undo/redo history, the canvas interactions (click a
+// panel to select it, drag to move its photo, scroll to zoom it) and the
+// exports. With ?shot= in the URL it runs a fixed scene instead, for
+// screenshots, and raises window.__shotReady once the scene is drawn.
+//
+// The state is kept in one object and exposed on window.CoverCoast for
+// debugging, next to render.
 
-import { renderCover } from './cover.js';
 import { LAYOUTS, layoutPanels } from './layouts.js';
 import { GRADES } from './grades.js';
-import { SIZES, exportCover, exportAll } from './export.js';
-import { defaultPanels, assignPhoto, setCrop, resetCrop, shufflePanels } from './panels.js';
-import { applyShot, markShotReady, orderPhotos } from './shots.js';
+import { renderCover } from './cover.js';
+import { createSlots, assignPhoto, setCrop, resetCrop, shuffleSlots } from './panels.js';
+import { EXPORT_SIZES, exportSizeById, exportSize, exportAllSizes } from './export.js';
+import { applyShotToState, markShotReady } from './shots.js';
 
-const canvas = document.getElementById('cover');
-const status = document.getElementById('status');
-const query = new URLSearchParams(location.search);
-const shot = query.get('shot');
+const SAMPLE_NAMES = ['pier', 'boulevard', 'neon', 'rooftop', 'boardwalk', 'rain'];
+const SAMPLE_LABELS = {
+  pier: 'Pier',
+  boulevard: 'Boulevard',
+  neon: 'Neon street',
+  rooftop: 'Rooftop dusk',
+  boardwalk: 'Boardwalk day',
+  rain: 'Rainy night',
+};
+const HISTORY_LIMIT = 60;
+const WHEEL_HISTORY_MS = 600;
+const PREVIEW_LONG_SIDE = 720;
 
-const SAMPLES = [
-  ['pier', 'Pier'],
-  ['boulevard', 'Boulevard'],
-  ['neon', 'Neon street'],
-  ['rooftop', 'Rooftop dusk'],
-  ['boardwalk', 'Boardwalk day'],
-  ['rain', 'Rainy night'],
-];
-
-let state = {
+const state = {
   photos: [],
-  panels: defaultPanels(4),
-  selectedPanel: 0,
+  slots: createSlots(0),
+  selectedSlot: 0,
   layout: 'grid9',
   grade: 'vice',
   intensity: 0.85,
   title: 'Sunset Heist',
   subtitle: 'Vice City nights',
   badge: 'Neon Nights',
-  heat: 4,
-  sizeId: '1080x1080',
+  heat: 5,
+  sizeId: 'square',
 };
 
-if (shot) state = applyShot(state, shot, query);
-const coverOnly = shot && (state.coverOnly ?? false);
-if (coverOnly) document.body.classList.add('shot-cover');
+const stage = document.getElementById('stage');
+const stageCtx = stage.getContext('2d');
+const statusLine = document.getElementById('statusLine');
+const params = new URLSearchParams(window.location.search);
+const shotMode = params.has('shot');
 
-// ---- history (undo / redo) ----
-const undoStack = [];
-const redoStack = [];
-const snapshot = () => JSON.stringify({
-  panels: state.panels, selectedPanel: state.selectedPanel, layout: state.layout,
-  grade: state.grade, intensity: state.intensity, title: state.title,
-  subtitle: state.subtitle, badge: state.badge, heat: state.heat, sizeId: state.sizeId,
-});
-function pushHistory() {
-  undoStack.push(snapshot());
-  if (undoStack.length > 60) undoStack.shift();
-  redoStack.length = 0;
-  syncUndoButtons();
+let undoStack = [];
+let redoStack = [];
+let pendingPhoto = -1;
+let lastWheelPush = 0;
+
+function setStatus(text) {
+  if (statusLine) statusLine.textContent = text;
 }
-function applySnapshot(json) {
-  const s = JSON.parse(json);
-  Object.assign(state, s);
+
+// --- history ---------------------------------------------------------------
+
+function snapshotState() {
+  return JSON.parse(
+    JSON.stringify({
+      layout: state.layout,
+      grade: state.grade,
+      intensity: state.intensity,
+      title: state.title,
+      subtitle: state.subtitle,
+      badge: state.badge,
+      heat: state.heat,
+      sizeId: state.sizeId,
+      selectedSlot: state.selectedSlot,
+      slots: state.slots,
+    }),
+  );
+}
+
+function restoreSnapshot(snap) {
+  state.layout = snap.layout;
+  state.grade = snap.grade;
+  state.intensity = snap.intensity;
+  state.title = snap.title;
+  state.subtitle = snap.subtitle;
+  state.badge = snap.badge;
+  state.heat = snap.heat;
+  state.sizeId = snap.sizeId;
+  state.selectedSlot = snap.selectedSlot;
+  state.slots = JSON.parse(JSON.stringify(snap.slots));
+}
+
+function pushHistory() {
+  undoStack.push(snapshotState());
+  if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
+  redoStack = [];
+  syncControls();
+}
+
+function undo() {
+  if (!undoStack.length) return;
+  redoStack.push(snapshotState());
+  restoreSnapshot(undoStack.pop());
   syncControls();
   render();
 }
-function syncUndoButtons() {
-  document.getElementById('undo').disabled = undoStack.length === 0;
-  document.getElementById('redo').disabled = redoStack.length === 0;
-}
-document.getElementById('undo').addEventListener('click', () => {
-  if (!undoStack.length) return;
-  redoStack.push(snapshot());
-  applySnapshot(undoStack.pop());
-  syncUndoButtons();
-});
-document.getElementById('redo').addEventListener('click', () => {
+
+function redo() {
   if (!redoStack.length) return;
-  undoStack.push(snapshot());
-  applySnapshot(redoStack.pop());
-  syncUndoButtons();
-});
-
-// ---- rendering ----
-function render() {
-  if (coverOnly) {
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
-  } else {
-    const size = SIZES.find((s) => s.id === state.sizeId) || SIZES[0];
-    const long = 720;
-    if (size.w >= size.h) {
-      canvas.width = long;
-      canvas.height = Math.round((long * size.h) / size.w);
-    } else {
-      canvas.height = long;
-      canvas.width = Math.round((long * size.w) / size.h);
-    }
-  }
-  renderCover(canvas, state);
-  syncChips();
+  undoStack.push(snapshotState());
+  restoreSnapshot(redoStack.pop());
+  syncControls();
+  render();
 }
 
-// ---- controls ----
-function chipGroup(el, items, current, onPick) {
-  el.innerHTML = '';
-  for (const item of items) {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.textContent = item.label ?? item.name;
-    b.title = item.blurb ?? '';
-    b.dataset.id = item.id;
-    b.classList.toggle('active', item.id === current);
-    b.addEventListener('click', () => { pushHistory(); onPick(item.id); render(); });
-    el.appendChild(b);
-  }
+// --- render ----------------------------------------------------------------
+
+function previewSize() {
+  const size = exportSizeById(state.sizeId);
+  const scale = PREVIEW_LONG_SIDE / Math.max(size.width, size.height);
+  return { width: Math.round(size.width * scale), height: Math.round(size.height * scale) };
 }
+
+export function render() {
+  const { width, height } = previewSize();
+  if (stage.width !== width) stage.width = width;
+  if (stage.height !== height) stage.height = height;
+  renderCover(stageCtx, state, width, height);
+}
+
+// --- controls --------------------------------------------------------------
+
+function buildChips(container, items, currentId, onPick) {
+  container.innerHTML = '';
+  items.forEach((item) => {
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'chip' + (item.id === currentId ? ' active' : '');
+    chip.textContent = item.name || item.label;
+    chip.title = item.blurb || item.label || '';
+    chip.addEventListener('click', () => onPick(item.id));
+    container.appendChild(chip);
+  });
+}
+
 function syncChips() {
-  for (const [id, group, current] of [
-    ['layouts', LAYOUTS, state.layout],
-    ['grades', GRADES, state.grade],
-    ['sizes', SIZES, state.sizeId],
-  ]) {
-    document.querySelectorAll(`#${id} button`).forEach((b) => {
-      b.classList.toggle('active', b.dataset.id === current);
-    });
-  }
-  document.querySelectorAll('#heat button').forEach((b, i) => {
-    b.classList.toggle('lit', i < state.heat);
+  buildChips(document.getElementById('layoutChips'), LAYOUTS, state.layout, (id) => {
+    pushHistory();
+    state.layout = id;
+    syncControls();
+    render();
   });
-  document.querySelectorAll('#thumbs button').forEach((b, i) => {
-    b.classList.toggle('active', i === state.panels[state.selectedPanel]?.photo);
+  buildChips(document.getElementById('gradeChips'), GRADES, state.grade, (id) => {
+    pushHistory();
+    state.grade = id;
+    syncControls();
+    render();
+  });
+  buildChips(document.getElementById('sizeChips'), EXPORT_SIZES, state.sizeId, (id) => {
+    pushHistory();
+    state.sizeId = id;
+    syncControls();
+    render();
   });
 }
 
-function buildControls() {
-  chipGroup(document.getElementById('layouts'), LAYOUTS, state.layout, (id) => { state.layout = id; });
-  chipGroup(document.getElementById('grades'), GRADES, state.grade, (id) => { state.grade = id; });
-  chipGroup(document.getElementById('sizes'), SIZES, state.sizeId, (id) => { state.sizeId = id; });
-  const heat = document.getElementById('heat');
-  heat.innerHTML = '';
-  for (let i = 0; i < 5; i++) {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.textContent = '★';
-    b.setAttribute('aria-label', `${i + 1} star${i ? 's' : ''}`);
-    b.addEventListener('click', () => { pushHistory(); state.heat = i + 1; render(); });
-    heat.appendChild(b);
+function syncHeatStars() {
+  const wrap = document.getElementById('heatStars');
+  wrap.innerHTML = '';
+  for (let star = 1; star <= 5; star++) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'star' + (star <= state.heat ? ' lit' : '');
+    button.textContent = '★';
+    button.setAttribute('aria-label', `${star} star${star > 1 ? 's' : ''}`);
+    button.addEventListener('click', () => {
+      pushHistory();
+      state.heat = star;
+      syncControls();
+      render();
+    });
+    wrap.appendChild(button);
+  }
+}
+
+function syncThumbs() {
+  const wrap = document.getElementById('thumbs');
+  wrap.innerHTML = '';
+  state.photos.forEach((photo, index) => {
+    const thumb = document.createElement('button');
+    thumb.type = 'button';
+    thumb.className = 'thumb' + (index === pendingPhoto ? ' picked' : '');
+    thumb.title = photo.label;
+    const img = document.createElement('img');
+    img.src = photo.src;
+    img.alt = photo.label;
+    thumb.appendChild(img);
+    thumb.addEventListener('click', () => {
+      pendingPhoto = pendingPhoto === index ? -1 : index;
+      syncThumbs();
+      setStatus(pendingPhoto >= 0 ? `Photo picked: ${photo.label} — now click a panel.` : '');
+    });
+    wrap.appendChild(thumb);
+  });
+}
+
+function syncPanelControls() {
+  const select = document.getElementById('panelPhoto');
+  select.innerHTML = '';
+  state.photos.forEach((photo, index) => {
+    const option = document.createElement('option');
+    option.value = String(index);
+    option.textContent = photo.label;
+    select.appendChild(option);
+  });
+  const slot = state.slots[state.selectedSlot];
+  if (slot) {
+    select.value = String(slot.photo);
+    document.getElementById('zoomRange').value = String(slot.zoom);
   }
 }
 
 function syncControls() {
-  document.getElementById('title').value = state.title;
-  document.getElementById('subtitle').value = state.subtitle;
-  document.getElementById('badge').value = state.badge;
-  document.getElementById('intensity').value = String(state.intensity);
-  const slot = state.panels[state.selectedPanel] || { photo: 0, zoom: 1 };
-  document.getElementById('zoom').value = String(slot.zoom || 1);
-  syncPanelSelect();
+  document.getElementById('titleInput').value = state.title;
+  document.getElementById('subtitleInput').value = state.subtitle;
+  document.getElementById('badgeInput').value = state.badge;
+  document.getElementById('intensityRange').value = String(state.intensity);
+  document.getElementById('undoBtn').disabled = undoStack.length === 0;
+  document.getElementById('redoBtn').disabled = redoStack.length === 0;
   syncChips();
-}
-
-function syncPanelSelect() {
-  const sel = document.getElementById('panel-photo');
-  sel.innerHTML = '';
-  state.photos.forEach((p, i) => {
-    const o = document.createElement('option');
-    o.value = String(i);
-    o.textContent = p.name;
-    sel.appendChild(o);
-  });
-  sel.value = String(state.panels[state.selectedPanel]?.photo ?? 0);
-}
-
-function syncThumbs() {
-  const box = document.getElementById('thumbs');
-  box.innerHTML = '';
-  state.photos.forEach((p, i) => {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.title = p.name;
-    const img = document.createElement('img');
-    img.src = p.img.src;
-    img.alt = p.name;
-    b.appendChild(img);
-    b.addEventListener('click', () => {
-      pushHistory();
-      state.panels = assignPhoto(state.panels, state.selectedPanel, i);
-      render();
-      syncPanelSelect();
-    });
-    box.appendChild(b);
-  });
-  syncChips();
-}
-
-// Text inputs: live render on input, one history entry on change.
-for (const [id, key] of [['title', 'title'], ['subtitle', 'subtitle'], ['badge', 'badge']]) {
-  const el = document.getElementById(id);
-  el.addEventListener('input', () => { state[key] = el.value; render(); });
-  el.addEventListener('change', pushHistory);
-}
-document.getElementById('intensity').addEventListener('input', (e) => {
-  state.intensity = Number(e.target.value);
-  render();
-});
-document.getElementById('intensity').addEventListener('change', pushHistory);
-document.getElementById('zoom').addEventListener('input', (e) => {
-  state.panels = setCrop(state.panels, state.selectedPanel, { zoom: Number(e.target.value) });
-  render();
-});
-document.getElementById('zoom').addEventListener('change', pushHistory);
-document.getElementById('panel-photo').addEventListener('change', (e) => {
-  pushHistory();
-  state.panels = assignPhoto(state.panels, state.selectedPanel, Number(e.target.value));
-  render();
-});
-document.getElementById('reset-crop').addEventListener('click', () => {
-  pushHistory();
-  state.panels = resetCrop(state.panels, state.selectedPanel);
-  render();
-  syncControls();
-});
-
-// ---- photos ----
-/** Loads an image from a URL, resolving to the image once it can be drawn. */
-export function loadImage(url) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = url;
-  });
-}
-
-async function addPhoto(img, name, key) {
-  state.photos.push({ img, name, key: key ?? name });
-}
-
-document.getElementById('photo').addEventListener('change', async (e) => {
-  const files = [...e.target.files];
-  if (!files.length) return;
-  pushHistory();
-  for (const file of files) {
-    try {
-      const img = await loadImage(URL.createObjectURL(file));
-      await addPhoto(img, file.name.replace(/\.[^.]+$/, ''));
-    } catch { /* skip unreadable files */ }
-  }
-  state.panels = state.panels.map((p) => ({
-    ...p, photo: Math.min(p.photo, state.photos.length - 1),
-  }));
+  syncHeatStars();
   syncThumbs();
-  syncPanelSelect();
-  render();
-  status.textContent = `${state.photos.length} photos loaded`;
-  e.target.value = '';
-});
+  syncPanelControls();
+}
 
-// ---- canvas interaction: pick a panel, drag to pan, scroll to zoom ----
-function canvasPoint(e) {
-  const rect = canvas.getBoundingClientRect();
+function bindTextInput(id, key) {
+  const input = document.getElementById(id);
+  input.addEventListener('input', () => {
+    state[key] = input.value;
+    render();
+  });
+  input.addEventListener('change', () => {
+    pushHistory();
+    render();
+  });
+}
+
+function bindControls() {
+  bindTextInput('titleInput', 'title');
+  bindTextInput('subtitleInput', 'subtitle');
+  bindTextInput('badgeInput', 'badge');
+
+  const intensity = document.getElementById('intensityRange');
+  intensity.addEventListener('input', () => {
+    state.intensity = Number(intensity.value);
+    render();
+  });
+  intensity.addEventListener('change', () => pushHistory());
+
+  const zoom = document.getElementById('zoomRange');
+  zoom.addEventListener('input', () => {
+    const slot = state.slots[state.selectedSlot];
+    if (slot) {
+      setCrop(slot, Number(zoom.value), slot.ox, slot.oy);
+      render();
+    }
+  });
+  zoom.addEventListener('change', () => pushHistory());
+
+  document.getElementById('panelPhoto').addEventListener('change', (event) => {
+    pushHistory();
+    assignPhoto(state.slots, state.selectedSlot, Number(event.target.value));
+    render();
+  });
+
+  document.getElementById('resetCropBtn').addEventListener('click', () => {
+    pushHistory();
+    resetCrop(state.slots[state.selectedSlot]);
+    syncControls();
+    render();
+  });
+
+  document.getElementById('shuffleBtn').addEventListener('click', () => {
+    pushHistory();
+    shuffleSlots(state.slots, state.photos.length);
+    render();
+  });
+
+  document.getElementById('undoBtn').addEventListener('click', undo);
+  document.getElementById('redoBtn').addEventListener('click', redo);
+
+  document.getElementById('exportBtn').addEventListener('click', async () => {
+    const size = exportSizeById(state.sizeId);
+    setStatus(`Rendering ${size.width}×${size.height}…`);
+    const filename = await exportSize(state, size);
+    setStatus(`Saved ${filename}`);
+  });
+
+  document.getElementById('exportAllBtn').addEventListener('click', async () => {
+    setStatus('Rendering 1 of 4…');
+    const saved = await exportAllSizes(state, (done, total) => {
+      setStatus(done < total ? `Rendering ${done + 1} of ${total}…` : `Saved ${total} sizes`);
+    });
+    setStatus(`Saved ${saved.length} sizes — ${saved.join(', ')}`);
+  });
+
+  document.getElementById('photoInput').addEventListener('change', (event) => {
+    const files = [...event.target.files];
+    files.forEach((file) => addUserPhoto(file));
+    event.target.value = '';
+  });
+}
+
+function addUserPhoto(file) {
+  if (!file.type.startsWith('image/')) return;
+  const src = URL.createObjectURL(file);
+  const image = new Image();
+  image.onload = () => {
+    state.photos.push({ name: file.name, label: file.name.replace(/\.[^.]+$/, ''), src, image });
+    state.slots = createSlots(state.photos.length);
+    syncControls();
+    render();
+  };
+  image.onerror = () => URL.revokeObjectURL(src);
+  image.src = src;
+}
+
+// --- canvas interaction ----------------------------------------------------
+
+function canvasPoint(event) {
+  const rect = stage.getBoundingClientRect();
   return {
-    x: ((e.clientX - rect.left) * canvas.width) / rect.width,
-    y: ((e.clientY - rect.top) * canvas.height) / rect.height,
+    x: ((event.clientX - rect.left) / rect.width) * stage.width,
+    y: ((event.clientY - rect.top) / rect.height) * stage.height,
   };
 }
-function hitPanel(cx, cy) {
-  const L = layoutPanels(state.layout, canvas.width, canvas.height);
-  for (let i = L.panels.length - 1; i >= 0; i--) {
-    const p = L.panels[i];
-    if (p.w <= 0) continue;
-    if (cx >= p.x && cx <= p.x + p.w && cy >= p.y && cy <= p.y + p.h) return i;
+
+function panelAt(point) {
+  const layout = layoutPanels(state.layout, stage.width, stage.height);
+  for (let index = layout.panels.length - 1; index >= 0; index--) {
+    const panel = layout.panels[index];
+    if (point.x >= panel.x && point.x <= panel.x + panel.w && point.y >= panel.y && point.y <= panel.y + panel.h) {
+      return { index, panel };
+    }
   }
-  return -1;
+  return null;
 }
 
-let drag = null;
-canvas.addEventListener('pointerdown', (e) => {
-  const { x, y } = canvasPoint(e);
-  const hit = hitPanel(x, y);
-  if (hit < 0) return;
-  pushHistory();
-  state.selectedPanel = hit;
-  syncControls();
-  drag = { x, y, ox: state.panels[hit].ox || 0, oy: state.panels[hit].oy || 0, panel: hit };
-  canvas.setPointerCapture(e.pointerId);
-  render();
-});
-canvas.addEventListener('pointermove', (e) => {
-  if (!drag) return;
-  const { x, y } = canvasPoint(e);
-  const L = layoutPanels(state.layout, canvas.width, canvas.height);
-  const p = L.panels[drag.panel];
-  if (!p) return;
-  state.panels = setCrop(state.panels, drag.panel, {
-    ox: drag.ox + (x - drag.x) / p.w,
-    oy: drag.oy + (y - drag.y) / p.h,
+function bindCanvas() {
+  let dragging = null;
+
+  stage.addEventListener('pointerdown', (event) => {
+    const hit = panelAt(canvasPoint(event));
+    if (!hit) return;
+    state.selectedSlot = Math.min(hit.index, state.slots.length - 1);
+    if (pendingPhoto >= 0) {
+      pushHistory();
+      assignPhoto(state.slots, state.selectedSlot, pendingPhoto);
+      pendingPhoto = -1;
+    }
+    const before = snapshotState();
+    dragging = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, moved: false, before };
+    stage.setPointerCapture(event.pointerId);
+    syncControls();
+    render();
   });
-  render();
-});
-canvas.addEventListener('pointerup', () => { drag = null; });
-let wheelPushed = false;
-canvas.addEventListener('wheel', (e) => {
-  e.preventDefault();
-  const { x, y } = canvasPoint(e);
-  const hit = hitPanel(x, y);
-  if (hit < 0) return;
-  if (!wheelPushed) {
-    pushHistory();
-    wheelPushed = true;
-    setTimeout(() => { wheelPushed = false; }, 600);
-  }
-  const slot = state.panels[hit];
-  state.panels = setCrop(state.panels, hit, {
-    zoom: (slot.zoom || 1) * Math.exp(-e.deltaY * 0.0012),
+
+  stage.addEventListener('pointermove', (event) => {
+    if (!dragging || event.pointerId !== dragging.pointerId) return;
+    const slot = state.slots[state.selectedSlot];
+    const layout = layoutPanels(state.layout, stage.width, stage.height);
+    const panel = layout.panels[Math.min(state.selectedSlot, layout.panels.length - 1)];
+    if (!slot || !panel) return;
+    const dx = event.clientX - dragging.startX;
+    const dy = event.clientY - dragging.startY;
+    if (Math.abs(dx) + Math.abs(dy) > 2) dragging.moved = true;
+    const rect = stage.getBoundingClientRect();
+    const scaleX = stage.width / rect.width;
+    const scaleY = stage.height / rect.height;
+    setCrop(slot, slot.zoom, slot.ox + (dx * scaleX) / (panel.w * 0.5), slot.oy + (dy * scaleY) / (panel.h * 0.5));
+    dragging.startX = event.clientX;
+    dragging.startY = event.clientY;
+    render();
   });
-  state.selectedPanel = hit;
-  render();
-  syncControls();
-}, { passive: false });
 
-// ---- shuffle: a fresh photo spread across the panels, same no-repeat rule ----
-document.getElementById('shuffle').addEventListener('click', () => {
-  pushHistory();
-  state.panels = shufflePanels(state.panels, state.photos.length);
-  render();
-  syncPanelSelect();
-  status.textContent = 'Photos shuffled';
-});
-
-// ---- export ----
-document.getElementById('export').addEventListener('click', async () => {
-  const size = SIZES.find((s) => s.id === state.sizeId) || SIZES[0];
-  status.textContent = 'Rendering…';
-  const name = await exportCover(state, size);
-  status.textContent = `Saved ${name}`;
-});
-document.getElementById('export-all').addEventListener('click', async () => {
-  status.textContent = 'Rendering 1 of 4…';
-  const names = await exportAll(state, (done, total) => {
-    status.textContent = done < total ? `Rendering ${done + 1} of ${total}…` : 'Saving…';
+  stage.addEventListener('pointerup', (event) => {
+    if (!dragging || event.pointerId !== dragging.pointerId) return;
+    if (dragging.moved) {
+      undoStack.push(dragging.before);
+      if (undoStack.length > HISTORY_LIMIT) undoStack.shift();
+      redoStack = [];
+    }
+    dragging = null;
+    syncControls();
+    render();
   });
-  status.textContent = `Saved ${names.join(', ')}`;
-});
 
-window.addEventListener('resize', () => { if (coverOnly) render(); });
-
-// ---- boot ----
-window.__coverApp = { get state() { return state; }, render };
-
-async function boot() {
-  buildControls();
-  syncUndoButtons();
-  try {
-    await Promise.all([
-      document.fonts.load('100px Anton'),
-      document.fonts.load('100px Pacifico'),
-      document.fonts.load('100px "Bebas Neue"'),
-      document.fonts.ready,
-    ]);
-  } catch { /* fall back to system fonts */ }
-  for (const [file, name] of SAMPLES) {
-    try {
-      const img = await loadImage(`samples/${file}.jpg`);
-      await addPhoto(img, name, file);
-    } catch { /* a missing sample just leaves fewer photos */ }
-  }
-  // A shot scene may lead with a different sample (boardwalk day, rainy
-  // night); reorder the loaded photos before the panels are assigned.
-  if (state.sampleOrder) state.photos = orderPhotos(state.photos, state.sampleOrder);
-  state.panels = defaultPanels(state.photos.length);
-  syncThumbs();
-  syncControls();
-  render();
-  if (shot) markShotReady();
+  stage.addEventListener('wheel', (event) => {
+    event.preventDefault();
+    const hit = panelAt(canvasPoint(event));
+    if (!hit) return;
+    const slot = state.slots[Math.min(hit.index, state.slots.length - 1)];
+    if (!slot) return;
+    const now = Date.now();
+    if (now - lastWheelPush > WHEEL_HISTORY_MS) {
+      pushHistory();
+      lastWheelPush = now;
+    }
+    const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
+    setCrop(slot, slot.zoom * factor, slot.ox, slot.oy);
+    state.selectedSlot = Math.min(hit.index, state.slots.length - 1);
+    syncControls();
+    render();
+  }, { passive: false });
 }
 
-boot();
+// --- photos ------------------------------------------------------------------
+
+function loadSamplePhotos() {
+  const loaded = [];
+  let settled = 0;
+  SAMPLE_NAMES.forEach((name) => {
+    const image = new Image();
+    image.onload = () => {
+      loaded.push({ name, label: SAMPLE_LABELS[name], src: `samples/${name}.jpg`, image });
+      finishOne();
+    };
+    image.onerror = () => finishOne();
+    image.src = `samples/${name}.jpg`;
+  });
+  function finishOne() {
+    settled++;
+    if (settled < SAMPLE_NAMES.length) return;
+    loaded.sort((a, b) => SAMPLE_NAMES.indexOf(a.name) - SAMPLE_NAMES.indexOf(b.name));
+    state.photos = loaded;
+    let coverOnly = false;
+    if (shotMode) {
+      coverOnly = applyShotToState(state, params);
+      if (coverOnly) document.body.classList.add('shot-cover');
+    }
+    state.slots = createSlots(state.photos.length);
+    syncControls();
+    render();
+    document.fonts.ready.then(() => {
+      render();
+      if (shotMode) markShotReady();
+    });
+  }
+}
+
+// --- boot --------------------------------------------------------------------
+
+bindControls();
+bindCanvas();
+syncControls();
+loadSamplePhotos();
+
+window.CoverCoast = { state, render, undo, redo, exportAllSizes };

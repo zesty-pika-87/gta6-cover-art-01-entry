@@ -1,91 +1,126 @@
-// Colour grades as gradient maps: a luminance value is remapped through a ramp
-// of shadow -> midtone -> highlight colours, which is what gives a photo the
-// Vice City sunset or neon-night look in one pass. The lookup tables are built
-// once per grade and cached.
+// Cover Coast — colour grades.
 //
-// v2: six grades — Golden Hour joins the five v1 grades with a warm amber ramp
-// for the new boardwalk daylight photo. The ramp interpolation is now a
-// smoothstep instead of linear, so midtones roll off without banding, and
-// every grade carries a one-line blurb for the editor chips' tooltips.
+// Each grade is a gradient map: a pixel's brightness is re-mapped through a
+// five-stop colour ramp (shadow, two mid-tones, highlight). Between stops
+// the ramp blends with a smoothstep, so no hard colour edge ever appears.
+// A 256-entry lookup table per grade is built once and cached.
+//
+// Brightness follows the usual luma weights, about 21% red, 72% green and
+// 7% blue. A grade touches only the art layer (the photos); the lettering
+// is drawn afterwards, so it stays crisp. Strength 0 leaves the photo
+// untouched, strength 1 is the full grade.
 
 export const GRADES = [
-  {
-    id: 'vice', name: 'Vice Sunset', blurb: 'Purple shadows, hot pink mids, sunset gold',
-    stops: [[0, '#160a24'], [0.22, '#5b1a5e'], [0.48, '#c22769'], [0.74, '#ff8a3d'], [1, '#ffd319']],
-  },
-  {
-    id: 'neon', name: 'Neon Nights', blurb: 'Deep blue shadows, violet and cyan glow',
-    stops: [[0, '#04041a'], [0.25, '#2b1a6e'], [0.5, '#7b2ff7'], [0.78, '#22d3ee'], [1, '#a5f3fc']],
-  },
-  {
-    id: 'palm', name: 'Palm Dusk', blurb: 'Dusky blue into warm orange and pale gold',
-    stops: [[0, '#0e1a2b'], [0.25, '#27395e'], [0.5, '#e8734a'], [0.78, '#f2a65a'], [1, '#f7d774']],
-  },
-  {
-    id: 'magenta', name: 'Magenta Heat', blurb: 'Wine shadows, hot magenta, soft pink highs',
-    stops: [[0, '#20001f'], [0.25, '#6d0f4e'], [0.5, '#d81159'], [0.78, '#ff5d8f'], [1, '#ffb3c6']],
-  },
-  {
-    id: 'teal', name: 'Teal Noir', blurb: 'Near-black teal, deep green, pale aqua highs',
-    stops: [[0, '#02141a'], [0.25, '#07333d'], [0.5, '#0e7c7b'], [0.78, '#43b8a2'], [1, '#c9f2e4']],
-  },
-  {
-    id: 'gold', name: 'Golden Hour', blurb: 'Warm amber for daylight: brown shadows, gold highs',
-    stops: [[0, '#1a0f02'], [0.25, '#7a3b12'], [0.5, '#e8862e'], [0.78, '#ffc53d'], [1, '#fff3b0']],
-  },
+  { id: 'vice', name: 'Vice Sunset', blurb: 'Deep purple shadows, hot pink mids, bright gold light.' },
+  { id: 'neon', name: 'Neon Nights', blurb: 'Near-black blue shadows, glowing violet and cyan.' },
+  { id: 'palm', name: 'Palm Dusk', blurb: 'Gloomy blue shadows, warm orange mids, pale gold light.' },
+  { id: 'magenta', name: 'Magenta Heat', blurb: 'Dark wine shadows, searing magenta, soft pink light.' },
+  { id: 'teal', name: 'Teal Noir', blurb: 'Almost-black teal shadows, deep green mids, pale aqua light.' },
+  { id: 'gold', name: 'Golden Hour', blurb: 'Dark brown shadows, golden orange mids — for daylight photos.' },
 ];
 
-const cache = new Map();
+// Five stops each: [shadow, low mid, high mid, low highlight, highlight].
+const RAMPS = {
+  vice: [
+    [16, 6, 36],
+    [92, 16, 88],
+    [214, 52, 116],
+    [246, 138, 66],
+    [255, 214, 132],
+  ],
+  neon: [
+    [6, 10, 40],
+    [28, 40, 120],
+    [120, 60, 200],
+    [40, 220, 230],
+    [190, 250, 255],
+  ],
+  palm: [
+    [14, 20, 44],
+    [70, 50, 90],
+    [200, 90, 60],
+    [245, 160, 70],
+    [255, 220, 150],
+  ],
+  magenta: [
+    [34, 6, 30],
+    [110, 20, 70],
+    [210, 40, 130],
+    [245, 90, 160],
+    [255, 190, 210],
+  ],
+  teal: [
+    [4, 18, 20],
+    [10, 60, 64],
+    [16, 110, 105],
+    [60, 190, 175],
+    [180, 245, 230],
+  ],
+  gold: [
+    [40, 24, 12],
+    [110, 70, 30],
+    [200, 130, 50],
+    [240, 180, 80],
+    [255, 235, 170],
+  ],
+};
 
-function hexRgb(hex) {
-  const n = parseInt(hex.slice(1), 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+export function gradeById(id) {
+  return GRADES.find((entry) => entry.id === id) || null;
 }
 
-/** 256-entry RGB lookup table for a grade id. */
-export function gradeLUT(id) {
-  if (cache.has(id)) return cache.get(id);
-  const grade = GRADES.find((g) => g.id === id) ?? GRADES[0];
-  const r = new Uint8Array(256);
-  const g = new Uint8Array(256);
-  const b = new Uint8Array(256);
-  const stops = grade.stops.map(([t, hex]) => [t, hexRgb(hex)]);
-  for (let i = 0; i < 256; i++) {
-    const t = i / 255;
-    let a = stops[0];
-    let z = stops[stops.length - 1];
-    for (let s = 0; s < stops.length - 1; s++) {
-      if (t >= stops[s][0] && t <= stops[s + 1][0]) { a = stops[s]; z = stops[s + 1]; break; }
+function smoothstep(u) {
+  const t = Math.max(0, Math.min(1, u));
+  return t * t * (3 - 2 * t);
+}
+
+// The ramp colour for a brightness t in [0, 1]: find the segment, ease
+// across it, lerp the two stops.
+function rampColour(ramp, t) {
+  const scaled = Math.max(0, Math.min(1, t)) * (ramp.length - 1);
+  const segment = Math.min(ramp.length - 2, Math.floor(scaled));
+  const local = smoothstep(scaled - segment);
+  const from = ramp[segment];
+  const to = ramp[segment + 1];
+  return [
+    Math.round(from[0] + (to[0] - from[0]) * local),
+    Math.round(from[1] + (to[1] - from[1]) * local),
+    Math.round(from[2] + (to[2] - from[2]) * local),
+  ];
+}
+
+const lutCache = new Map();
+
+// The 256-entry lookup table for a grade: index = brightness, value = colour.
+export function gradeLookupTable(id) {
+  const key = RAMPS[id] ? id : 'vice';
+  if (!lutCache.has(key)) {
+    const ramp = RAMPS[key];
+    const table = new Array(256);
+    for (let level = 0; level < 256; level++) {
+      table[level] = rampColour(ramp, level / 255);
     }
-    const span = z[0] - a[0] || 1;
-    // Smoothstep eases the blend between stops so gradients stay band-free.
-    const lin = Math.min(1, Math.max(0, (t - a[0]) / span));
-    const f = lin * lin * (3 - 2 * lin);
-    r[i] = Math.round(a[1][0] + (z[1][0] - a[1][0]) * f);
-    g[i] = Math.round(a[1][1] + (z[1][1] - a[1][1]) * f);
-    b[i] = Math.round(a[1][2] + (z[1][2] - a[1][2]) * f);
+    lutCache.set(key, table);
   }
-  const lut = { r, g, b };
-  cache.set(id, lut);
-  return lut;
+  return lutCache.get(key);
 }
 
-/**
- * Remaps every pixel of the context's canvas through the grade's lookup table,
- * blended with the original by `intensity` (0 = untouched, 1 = full grade).
- * Runs on the art layer only, so lettering drawn later stays crisp.
- */
-export function applyGrade(ctx, W, H, gradeId, intensity) {
-  if (intensity <= 0) return;
-  const lut = gradeLUT(gradeId);
-  const img = ctx.getImageData(0, 0, W, H);
-  const d = img.data;
-  const inv = 1 - intensity;
-  for (let i = 0; i < d.length; i += 4) {
-    const l = (d[i] * 54 + d[i + 1] * 183 + d[i + 2] * 19) >> 8;
-    d[i] = d[i] * inv + lut.r[l] * intensity;
-    d[i + 1] = d[i + 1] * inv + lut.g[l] * intensity;
-    d[i + 2] = d[i + 2] * inv + lut.b[l] * intensity;
+// Re-map every pixel of an ImageData through the grade, mixed with the
+// original photo by strength (0 = unchanged, 1 = full grade).
+export function applyGrade(imageData, id, strength) {
+  const amount = Math.max(0, Math.min(1, strength));
+  if (amount === 0) return imageData;
+  const table = gradeLookupTable(id);
+  const pixels = imageData.data;
+  for (let i = 0; i < pixels.length; i += 4) {
+    const red = pixels[i];
+    const green = pixels[i + 1];
+    const blue = pixels[i + 2];
+    const brightness = Math.round(red * 0.21 + green * 0.72 + blue * 0.07);
+    const graded = table[Math.max(0, Math.min(255, brightness))];
+    pixels[i] = Math.round(red + (graded[0] - red) * amount);
+    pixels[i + 1] = Math.round(green + (graded[1] - green) * amount);
+    pixels[i + 2] = Math.round(blue + (graded[2] - blue) * amount);
   }
-  ctx.putImageData(img, 0, 0);
+  return imageData;
 }
