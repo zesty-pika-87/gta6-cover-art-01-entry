@@ -1,22 +1,20 @@
 # Cover Coast — GTA-style Cover Maker
 
-[![make.fun bounty](https://make.fun/badge/gta6-cover-art-01.svg)](https://make.fun/bounty/gta6-cover-art-01)
-[![rank](https://make.fun/badge/gta6-cover-art-01/zesty-pika-87/gta6-cover-art-01-entry/rank.svg)](https://make.fun/bounty/gta6-cover-art-01)
-[![reward](https://make.fun/badge/gta6-cover-art-01/zesty-pika-87/gta6-cover-art-01-entry/reward.svg)](https://make.fun/bounty/gta6-cover-art-01)
+[![make.fun bounty](https://img.shields.io/badge/make.fun-gta6--cover--art--01-ff2e88)](https://make.fun/c/gta6-cover-art-01)
+[![owner](https://img.shields.io/badge/owner-zesty--pika--87-7a5cff)](https://github.com/zesty-pika-87/gta6-cover-art-01-entry)
+[![reward](https://img.shields.io/badge/reward-%2450%20top%20prize-ffd23e)](https://make.fun/c/gta6-cover-art-01)
 
-Cover Coast turns your own photos into GTA-style cover art, in the browser, offline. Pick a layout, pick a colour grade, write the title, export the PNG and share it. Your photos never leave your machine.
+Turn your own photos into a GTA-style poster cover and export it as a PNG to share. Cover Coast fills a multi-panel poster from any photos, crops and positions each one, grades it in a Vice City sunset or neon palette, and letters your caption in bold poster type — all offline, in the browser, with your photos never leaving your machine.
 
-- **7 layouts** — Full Bleed, Four Panel, Hero + Three, Nine Panel, Mosaic Nine, Tilted Snapshots, Story Stack.
-- **6 colour grades** — Vice Sunset, Neon Nights, Palm Dusk, Magenta Heat, Teal Noir, Golden Hour. Each one is a smooth gradient map over the photos, with a strength slider.
-- **Poster lettering** — a big Anton title in a sunset gradient with a dark outline, a Pacifico script subtitle in glowing cyan, a tilted badge ribbon and a five-star heat meter.
-- **Photo handling** — load as many of your own photos as you like, click a photo then a panel to place it, drag a panel to move its photo, scroll to zoom it, shuffle the panels without ever putting the same photo twice side by side.
-- **Export** — PNG in 4 sizes at once: Square 1080×1080, Portrait 1080×1350, Landscape 1920×1080, Story 1080×1920. File names carry the title, like `cover-sunset-heist-1080x1080.png`.
-- **Undo / redo** — every change is a step you can walk back.
-- **Effects** — deterministic film grain (identical in preview and every export), vignette, halftone dots and sunburst rays in the title band, a thin white poster frame.
+## What it does
 
-## Originality
-
-Everything here is original work. No Rockstar Games logo, wordmark, artwork, character or font is used anywhere. The three fonts — Anton, Pacifico and Bebas Neue — ship under the SIL Open Font License; see `app/fonts/OFL.txt`. The six sample photos are free to use.
+- **7 layouts** — Full Bleed, Four Panel, Hero + Three, Nine Panel, Mosaic Nine, Tilted Snapshots (framed polaroids over a dimmed backdrop), Story Stack.
+- **6 colour grades** — Vice Sunset, Neon Nights, Palm Dusk, Magenta Heat, Teal Noir, Golden Hour. Each is a five-stop gradient map with smooth interpolation and a strength slider.
+- **Any photo** — add your own images, click a photo then a panel to place it, drag a panel to pan, scroll to zoom, shuffle to re-deal the photos. Six free sample photos are bundled so it works out of the box.
+- **Poster lettering** — Anton title with a gold-to-pink gradient (wraps to two balanced lines when needed), Pacifico neon subtitle, a tilted badge ribbon and a five-star heat meter.
+- **Export PNG in 4 sizes** — Square 1080 × 1080, Portrait 1080 × 1350, Landscape 1920 × 1080, Story 1080 × 1920 — one at a time or all four at once. File names come from the title: `cover-sunset-heist-1080x1080.png`.
+- **Undo / redo** — every edit is a snapshot, up to 60 steps back.
+- **Deterministic effects** — seeded film grain, vignette, halftone dots and sunburst rays, identical in the preview and every export.
 
 ## Run it
 
@@ -25,27 +23,22 @@ node serve.ts
 # open http://localhost:8080
 ```
 
-Node 22, standard library only, no build step, no network requests: `app/` is plain static files.
-
-## Hand it in
+Hand the entry in (Node 22):
 
 ```sh
-MAKEFUN_OUTPUT_DIR=out node main.ts
+mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 ```
 
-`main.ts` copies `app/` and `screenshots/` into the output directory, checks that there are exactly 4 screenshots of at most 256 KiB each, and writes `dossier.json` there with `buildDossier` from `vendor/makefun-app.ts`. Running it twice over the same inputs writes byte-identical output.
+`main.ts` copies `app/` and `screenshots/` to the output directory, checks the screenshots against the scorer's caps (exactly 4, each at most 256 KiB, long side at most 1280 px, short side at least 480 px), and writes `dossier.json`.
 
 ## Screenshots
 
-Four fixed scenes, listed in `shots.json`, each rendered by the app itself through `?shot=`:
+Four fixed scenes (`shots.json`): the first is the cover — a 1920 × 1080 Nine Panel cover, "Sunset Heist" in Vice Sunset — followed by the editor at work, a portrait cover ("Boulevard Queen", Golden Hour) and a square Mosaic Nine cover ("Neon Nights").
 
-1. `1-cover.jpg` — the hero cover, 1920×1080: Nine Panel, Vice Sunset, "Sunset Heist".
-2. `2-editor.jpg` — the editor with a photo loaded, 1280×720.
-3. `3-cover.jpg` — a portrait cover, 864×1080: Nine Panel, Golden Hour, "Boulevard Queen".
-4. `4-cover.jpg` — a square cover, 1080×1080: Mosaic Nine, Neon Nights, "Neon Nights".
+## Originality
 
-The first screenshot by name is the cover — the one the judge sees largest.
+No Rockstar Games logo, wordmark, artwork, character or font is used anywhere. The lettering fonts — Anton, Pacifico and Bebas Neue — are SIL Open Font License files under `app/fonts/` (see `app/fonts/OFL.txt`). The six sample photos are free to use. All art, code and design in this repository are original.
 
 ## License
 
-MIT. See `LICENSE`.
+MIT — see [LICENSE](LICENSE).

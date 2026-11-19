@@ -1,186 +1,170 @@
-// Cover Coast — the cover renderer.
+// cover.js — the cover renderer of Cover Coast.
 //
-// The cover is painted in layers, in this order:
-//   1. the art layer (its own canvas, dark purple ground): every panel's
-//      photo, cover-fit to its crop, tilted panels rotated about their
-//      centre, polaroids in a cream frame with a shadow, a thin dark edge
-//      on plain multi-panel panels so the grid reads as separate photos;
-//      on the Tilted layout the full-bleed backdrop is dimmed by a dark
-//      wash of about 45%.
-//   2. the grade, applied to the art layer alone.
-//   3. the art layer onto the main canvas.
-//   4. the title band (dark gradient, orange edge line, faint sunburst
-//      behind, halftone over the lower half) or a scrim gradient when the
-//      layout has no band of its own.
-//   5. the title, subtitle, badge and heat meter.
-//   6. the thin white poster frame, deterministic grain, vignette.
+// renderCover draws, in order:
+//   1. an offscreen art layer (dark purple ground, every panel's photo in
+//      cover-fit with its crop, polaroid frames, thin dark seams, and a
+//      45% dim over the full-bleed backdrop of the Tilted layout),
+//   2. the grade, applied to the art layer only,
+//   3. the art layer onto the main canvas,
+//   4. the title band (dark gradient, orange top edge, sunburst, halftone)
+//      or a scrim gradient when the layout floats its caption,
+//   5. title, subtitle, badge and heat meter,
+//   6. the thin white poster frame, deterministic grain and vignette.
 //
-// Lettering is drawn after the grade, so it always stays sharp.
+// Photos never leave the panel: offsets are clamped so the drawn photo
+// always covers its panel. In shot-cover mode the canvas is rendered at
+// viewport size (set by main.js), so the screenshot stays razor sharp.
 
-import { layoutPanels } from './layouts.js';
+import { getLayout } from './layouts.js';
 import { applyGrade } from './grades.js';
-import { drawCoverTitle, drawSubtitle, drawBadge, drawHeat } from './lettering.js';
-import { applyGrain, applyVignette, drawHalftone, drawSunburst, drawPosterFrame } from './effects.js';
+import { drawTitle, drawSubtitle, drawBadge, drawHeatMeter } from './lettering.js';
+import { drawGrain, drawVignette, drawHalftone, drawSunburst, drawPosterFrame } from './effects.js';
 
-const ART_GROUND = '#150a22';
-const BACKDROP_DIM = 0.45;
-const PANEL_EDGE = 'rgba(12, 4, 22, 0.55)';
-const POLAROID_CREAM = '#f6efdd';
-
-function drawPhotoCoverFit(ctx, image, panel, crop) {
-  const zoom = Math.max(1, crop.zoom || 1);
-  const scale = Math.max(panel.w / image.naturalWidth, panel.h / image.naturalHeight) * zoom;
-  const drawnW = image.naturalWidth * scale;
-  const drawnH = image.naturalHeight * scale;
-  const maxOx = Math.max(0, (drawnW - panel.w) / 2);
-  const maxOy = Math.max(0, (drawnH - panel.h) / 2);
-  const dx = panel.x + (panel.w - drawnW) / 2 + (crop.ox || 0) * maxOx;
-  const dy = panel.y + (panel.h - drawnH) / 2 + (crop.oy || 0) * maxOy;
-  ctx.drawImage(image, dx, dy, drawnW, drawnH);
+function coverFitDraw(ctx, image, panel, slot) {
+  const imageW = image.naturalWidth || image.width;
+  const imageH = image.naturalHeight || image.height;
+  const scale = Math.max(panel.w / imageW, panel.h / imageH) * slot.zoom;
+  const drawW = imageW * scale;
+  const drawH = imageH * scale;
+  const maxShiftX = Math.max(0, (drawW - panel.w) / 2);
+  const maxShiftY = Math.max(0, (drawH - panel.h) / 2);
+  const dx = (panel.w - drawW) / 2 + slot.offsetX * maxShiftX;
+  const dy = (panel.h - drawH) / 2 + slot.offsetY * maxShiftY;
+  return { dx, dy, drawW, drawH };
 }
 
-function drawPhotoPanel(ctx, image, panel, crop) {
+function placeholderFill(ctx, panel, index) {
+  const gradient = ctx.createLinearGradient(panel.x, panel.y, panel.x + panel.w, panel.y + panel.h);
+  const hues = [
+    ['#3b1155', '#ff2e88'],
+    ['#1c2a6b', '#2ec8ff'],
+    ['#5a1a1a', '#ff7a1a'],
+  ];
+  const pair = hues[index % hues.length];
+  gradient.addColorStop(0, pair[0]);
+  gradient.addColorStop(1, pair[1]);
+  ctx.fillStyle = gradient;
+  ctx.fillRect(panel.x, panel.y, panel.w, panel.h);
+}
+
+function drawPanelPhoto(ctx, panel, slot, photo, slotIndex) {
   ctx.save();
-  ctx.translate(panel.x + panel.w / 2, panel.y + panel.h / 2);
-  ctx.rotate(panel.rot || 0);
-  if (panel.framed) {
-    // Cream polaroid frame, thicker at the foot, with a soft shadow.
-    const border = Math.max(6, Math.min(panel.w, panel.h) * 0.05);
-    const foot = border * 2.2;
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
-    ctx.shadowBlur = border * 1.2;
-    ctx.shadowOffsetY = border * 0.5;
-    ctx.fillStyle = POLAROID_CREAM;
-    ctx.fillRect(-panel.w / 2 - border, -panel.h / 2 - border, panel.w + border * 2, panel.h + border + foot);
+  const centreX = panel.x + panel.w / 2;
+  const centreY = panel.y + panel.h / 2;
+  ctx.translate(centreX, centreY);
+  if (panel.rotation) ctx.rotate(panel.rotation);
+
+  if (panel.frame) {
+    // Polaroid frame: cream border, thicker at the foot, soft shadow.
+    const pad = Math.max(4, 0.045 * Math.min(panel.w, panel.h));
+    const foot = pad * 3.2;
+    ctx.fillStyle = '#fdf6e3';
+    ctx.shadowColor = 'rgba(5, 1, 16, 0.55)';
+    ctx.shadowBlur = Math.max(6, pad * 1.6);
+    ctx.shadowOffsetY = Math.max(3, pad * 0.7);
+    ctx.fillRect(-panel.w / 2 - pad, -panel.h / 2 - pad, panel.w + pad * 2, panel.h + pad + foot);
     ctx.shadowColor = 'transparent';
-    ctx.shadowBlur = 0;
-    ctx.shadowOffsetY = 0;
-    ctx.beginPath();
-    ctx.rect(-panel.w / 2, -panel.h / 2, panel.w, panel.h);
-    ctx.clip();
-    drawPhotoCoverFit(ctx, image, { x: -panel.w / 2, y: -panel.h / 2, w: panel.w, h: panel.h }, crop);
-  } else {
-    ctx.beginPath();
-    ctx.rect(-panel.w / 2, -panel.h / 2, panel.w, panel.h);
-    ctx.clip();
-    drawPhotoCoverFit(ctx, image, { x: -panel.w / 2, y: -panel.h / 2, w: panel.w, h: panel.h }, crop);
   }
-  ctx.restore();
-  if (panel.dim) {
+
+  ctx.beginPath();
+  ctx.rect(-panel.w / 2, -panel.h / 2, panel.w, panel.h);
+  ctx.clip();
+  if (photo && photo.image) {
+    const fit = coverFitDraw(ctx, photo.image, panel, slot);
+    ctx.drawImage(photo.image, fit.dx - panel.w / 2, fit.dy - panel.h / 2, fit.drawW, fit.drawH);
+  } else {
     ctx.save();
-    ctx.fillStyle = `rgba(10, 5, 20, ${BACKDROP_DIM})`;
-    ctx.fillRect(panel.x, panel.y, panel.w, panel.h);
+    ctx.translate(-panel.w / 2, -panel.h / 2);
+    placeholderFill(ctx, { x: 0, y: 0, w: panel.w, h: panel.h }, slotIndex);
     ctx.restore();
   }
-}
-
-function drawEmptyPanel(ctx, panel) {
-  const gradient = ctx.createLinearGradient(panel.x, panel.y, panel.x + panel.w, panel.y + panel.h);
-  gradient.addColorStop(0, '#2a1245');
-  gradient.addColorStop(1, '#170b28');
-  ctx.save();
-  ctx.translate(panel.x + panel.w / 2, panel.y + panel.h / 2);
-  ctx.rotate(panel.rot || 0);
-  ctx.fillStyle = gradient;
-  ctx.fillRect(-panel.w / 2, -panel.h / 2, panel.w, panel.h);
   ctx.restore();
 }
 
 function drawTitleBand(ctx, band, width, height) {
   const gradient = ctx.createLinearGradient(0, band.y, 0, band.y + band.h);
-  gradient.addColorStop(0, '#1d0c31');
-  gradient.addColorStop(1, '#0b0517');
+  gradient.addColorStop(0, '#1c0b33');
+  gradient.addColorStop(1, '#0a0418');
   ctx.save();
   ctx.fillStyle = gradient;
   ctx.fillRect(band.x, band.y, band.w, band.h);
-  // A faint sunrise behind the lettering.
   drawSunburst(ctx, band);
-  // Halftone dots over the lower half of the band.
   drawHalftone(ctx, band);
-  // The orange edge line where the band meets the photos.
-  ctx.fillStyle = '#ff7a2e';
-  ctx.fillRect(band.x, band.y, band.w, Math.max(2, Math.min(width, height) * 0.004));
+  // Orange rule along the band's top edge.
+  ctx.fillStyle = '#ff7a1a';
+  ctx.fillRect(band.x, band.y, band.w, Math.max(2, 0.006 * height));
   ctx.restore();
+  void width;
 }
 
 function drawScrim(ctx, width, height) {
-  const gradient = ctx.createLinearGradient(0, height * 0.5, 0, height);
-  gradient.addColorStop(0, 'rgba(12, 5, 24, 0)');
-  gradient.addColorStop(1, 'rgba(12, 5, 24, 0.85)');
+  const top = height * 0.5;
+  const gradient = ctx.createLinearGradient(0, top, 0, height);
+  gradient.addColorStop(0, 'rgba(8, 2, 20, 0)');
+  gradient.addColorStop(1, 'rgba(8, 2, 20, 0.85)');
   ctx.save();
   ctx.fillStyle = gradient;
-  ctx.fillRect(0, height * 0.5, width, height * 0.5);
+  ctx.fillRect(0, top, width, height - top);
   ctx.restore();
 }
 
-// Paint the whole cover onto ctx at this size, from the live state.
-export function renderCover(ctx, state, width, height) {
-  const layout = layoutPanels(state.layout, width, height);
-
-  // 1 — the art layer.
-  const art = document.createElement('canvas');
-  art.width = width;
-  art.height = height;
-  const artCtx = art.getContext('2d');
-  artCtx.fillStyle = ART_GROUND;
-  artCtx.fillRect(0, 0, width, height);
-  layout.panels.forEach((panel, index) => {
-    const slot = state.slots[index];
-    const photo = slot ? state.photos[slot.photo] : null;
-    if (photo && photo.image && photo.image.naturalWidth > 0) {
-      drawPhotoPanel(artCtx, photo.image, panel, slot);
-    } else {
-      drawEmptyPanel(artCtx, panel);
-    }
-    if (!panel.framed && layout.panels.length > 1) {
-      artCtx.save();
-      artCtx.strokeStyle = PANEL_EDGE;
-      artCtx.lineWidth = Math.max(1, Math.min(width, height) * 0.004);
-      artCtx.strokeRect(panel.x, panel.y, panel.w, panel.h);
-      artCtx.restore();
-    }
-  });
-
-  // 2 — the grade, on the art layer alone.
-  const artImage = artCtx.getImageData(0, 0, width, height);
-  applyGrade(artImage, state.grade, state.intensity);
-  artCtx.putImageData(artImage, 0, 0);
-
-  // 3 — the art layer onto the main canvas.
-  ctx.save();
-  ctx.drawImage(art, 0, 0);
-  ctx.restore();
-
-  // 4 — the title band, or a scrim when the layout has no band.
-  const title = layout.title;
-  if (title.band) {
-    drawTitleBand(ctx, title, width, height);
-  } else {
-    drawScrim(ctx, width, height);
-  }
-
-  // 5 — lettering: title, then the subtitle right under the title
-  // block's real bottom edge, then badge and heat.
-  const titleMetrics = drawCoverTitle(ctx, state.title, title);
-  const foot = title.band
-    ? title
-    : { x: title.x, y: title.y, w: title.w, h: Math.max(title.h, height - title.y), align: title.align };
-  drawSubtitle(ctx, state.subtitle, titleMetrics.blockBottom, foot);
-  drawBadge(ctx, state.badge, width, height);
-  drawHeat(ctx, state.heat, width, height);
-
-  // 6 — frame, grain, vignette.
-  drawPosterFrame(ctx, width, height);
-  applyGrain(ctx, width, height);
-  applyVignette(ctx, width, height);
-}
-
-// A fresh canvas with the cover rendered on it, at this size.
-export function makeCoverCanvas(state, width, height) {
-  const canvas = document.createElement('canvas');
+export function renderCover(canvas, state, options = {}) {
+  const width = options.width || canvas.width;
+  const height = options.height || canvas.height;
   canvas.width = width;
   canvas.height = height;
   const ctx = canvas.getContext('2d');
-  renderCover(ctx, state, width, height);
+  const layout = getLayout(state.layout, width, height);
+
+  // 1. Art layer: panels, frames, seams, dimmed Tilted backdrop.
+  const art = document.createElement('canvas');
+  art.width = width;
+  art.height = height;
+  const actx = art.getContext('2d');
+  actx.fillStyle = '#160a2a';
+  actx.fillRect(0, 0, width, height);
+  layout.panels.forEach((panel, index) => {
+    const slot = state.slots[index] || { photoIndex: 0, zoom: 1, offsetX: 0, offsetY: 0 };
+    const photo = state.photos[slot.photoIndex];
+    drawPanelPhoto(actx, panel, slot, photo, index);
+    if (index === 0 && state.layout === 'tilted') {
+      actx.save();
+      actx.fillStyle = 'rgba(10, 4, 24, 0.45)';
+      actx.fillRect(0, 0, width, height);
+      actx.restore();
+    }
+  });
+  // Thin dark seams so a multi-panel grid reads as separate photos.
+  const seam = Math.max(1, 0.004 * Math.min(width, height));
+  actx.save();
+  actx.strokeStyle = 'rgba(20, 5, 40, 0.85)';
+  actx.lineWidth = seam;
+  layout.panels.forEach((panel) => {
+    if (panel.frame || panel.rotation) return;
+    actx.strokeRect(panel.x + seam / 2, panel.y + seam / 2, panel.w - seam, panel.h - seam);
+  });
+  actx.restore();
+
+  // 2. Grade on the art layer only.
+  applyGrade(actx, width, height, state.grade, state.intensity);
+
+  // 3. Art layer onto the main canvas.
+  ctx.drawImage(art, 0, 0);
+
+  // 4. Title band or scrim.
+  if (layout.title.band) drawTitleBand(ctx, layout.title, width, height);
+  else if (layout.scrim) drawScrim(ctx, width, height);
+
+  // 5. Lettering: title, subtitle anchored under its real bottom edge,
+  // badge ribbon and heat stars.
+  const titleResult = drawTitle(ctx, layout.title, state.title);
+  drawSubtitle(ctx, layout.title, titleResult.bottom, state.subtitle);
+  drawBadge(ctx, width, state.badge);
+  drawHeatMeter(ctx, width, state.heat);
+
+  // 6. Poster frame, grain, vignette.
+  drawPosterFrame(ctx, width, height);
+  drawGrain(ctx, width, height);
+  drawVignette(ctx, width, height);
   return canvas;
 }

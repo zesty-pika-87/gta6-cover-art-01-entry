@@ -1,24 +1,18 @@
-// Cover Coast — the four fixed screenshot scenes.
+// shots.js — the four fixed scenes used for screenshots.
 //
-// Every screenshot the entry ships is one of these scenes, picked with
-// ?shot=<name> in the URL. A scene fixes the layout, grade, words, heat
-// and photo order, so the same scene always renders the same cover.
-// Query overrides let a scene be re-captioned without touching the code:
-//   caption — replaces the title
-//   layout  — replaces the layout (only a known layout id)
-//   grade   — replaces the grade (only a known grade id)
-//   photo   — moves the named sample to the front of the photo order
+// Each scene is a complete editor state (layout, grade, words, heat, photo
+// order, cover-only or editor) chosen through the `?shot=` URL parameter.
+// The cover scene is the default cover the judge sees first: Nine Panel,
+// Vice Sunset, "Sunset Heist". Query parameters may override a scene:
+// `caption` replaces the title, `layout` and `grade` replace the picks,
+// and `photo` moves the named sample to the front of the photo order.
 //
-// The scenes:
-//   cover          — the hero: Nine Panel, Vice Sunset, "Sunset Heist"
-//   cover-portrait — Nine Panel, Golden Hour, "Boulevard Queen"
-//   cover-square   — Mosaic Nine, Neon Nights, "Neon Nights"
-//   editor         — the editor itself, photo loaded, cover live
+// markShotReady signals the screenshot process: after two animation
+// frames plus 300 ms, `window.__shotReady` is true and the scene is drawn.
 
-import { layoutById } from './layouts.js';
-import { gradeById } from './grades.js';
+import { defaultSlots } from './panels.js';
 
-export const SHOT_SCENES = {
+export const SHOTS = {
   cover: {
     layout: 'grid9',
     grade: 'vice',
@@ -26,16 +20,18 @@ export const SHOT_SCENES = {
     subtitle: 'Vice City nights',
     badge: 'Neon Nights',
     heat: 5,
+    size: '1920x1080',
     coverOnly: true,
     order: ['pier', 'boardwalk', 'neon', 'rooftop', 'rain', 'boulevard'],
   },
   'cover-portrait': {
     layout: 'grid9',
-    grade: 'gold',
+    grade: 'golden',
     title: 'Boulevard Queen',
     subtitle: 'Palm trees & pink skies',
     badge: 'Est. 2026',
     heat: 4,
+    size: '1080x1350',
     coverOnly: true,
     order: ['boardwalk', 'pier', 'boulevard', 'rooftop', 'neon', 'rain'],
   },
@@ -46,6 +42,7 @@ export const SHOT_SCENES = {
     subtitle: 'Drive fast, shine brighter',
     badge: 'Vice Sunset',
     heat: 5,
+    size: '1080x1080',
     coverOnly: true,
     order: ['rain', 'neon', 'rooftop', 'pier', 'boardwalk', 'boulevard'],
   },
@@ -56,58 +53,52 @@ export const SHOT_SCENES = {
     subtitle: 'Vice City nights',
     badge: 'Neon Nights',
     heat: 5,
+    size: '1080x1080',
     coverOnly: false,
     order: ['pier', 'boulevard', 'neon', 'rooftop', 'boardwalk', 'rain'],
   },
 };
 
-export function shotScene(name) {
-  return SHOT_SCENES[name] || null;
+// Reorder the state's photos so the named samples come first in `order`,
+// keeping the rest in their current order; then rebuild the default slots.
+function applyPhotoOrder(state, order) {
+  const byName = new Map(state.photos.map((photo) => [photo.name, photo]));
+  const ordered = [];
+  for (const name of order) {
+    const photo = byName.get(name);
+    if (photo && !ordered.includes(photo)) ordered.push(photo);
+  }
+  for (const photo of state.photos) {
+    if (!ordered.includes(photo)) ordered.push(photo);
+  }
+  state.photos = ordered;
+  state.slots = defaultSlots(state.photos.length);
 }
 
-// Reorder the state's photos to the scene's order; photos the scene
-// does not name keep their relative order at the back.
-function orderPhotosForScene(state, order) {
-  const rank = new Map(order.map((name, index) => [name, index]));
-  state.photos.sort((a, b) => {
-    const aRank = rank.has(a.name) ? rank.get(a.name) : order.length;
-    const bRank = rank.has(b.name) ? rank.get(b.name) : order.length;
-    return aRank - bRank;
-  });
-}
-
-// Apply a scene from URL parameters to the live state. Returns whether
-// the scene shows the cover alone (no editor chrome).
-export function applyShotToState(state, params) {
-  const name = params.get('shot') || '';
-  const scene = shotScene(name);
-  if (!scene) return false;
-
-  state.layout = scene.layout;
-  state.grade = scene.grade;
-  state.title = scene.title;
+export function applyShot(state, shotName, params) {
+  const scene = SHOTS[shotName] || SHOTS.cover;
+  const order = [...scene.order];
+  const photoOverride = params.get('photo');
+  if (photoOverride) {
+    const at = order.indexOf(photoOverride);
+    if (at > 0) {
+      order.splice(at, 1);
+      order.unshift(photoOverride);
+    }
+  }
+  applyPhotoOrder(state, order);
+  state.layout = params.get('layout') || scene.layout;
+  state.grade = params.get('grade') || scene.grade;
+  state.title = params.get('caption') || scene.title;
   state.subtitle = scene.subtitle;
   state.badge = scene.badge;
   state.heat = scene.heat;
-
-  const caption = params.get('caption');
-  if (caption) state.title = caption.slice(0, 40);
-  const layout = params.get('layout');
-  if (layout && layoutById(layout)) state.layout = layout;
-  const grade = params.get('grade');
-  if (grade && gradeById(grade)) state.grade = grade;
-
-  let order = [...scene.order];
-  const photo = params.get('photo');
-  if (photo && order.includes(photo)) {
-    order = [photo, ...order.filter((entry) => entry !== photo)];
-  }
-  orderPhotosForScene(state, order);
-  return scene.coverOnly;
+  state.size = scene.size;
+  state.coverOnly = scene.coverOnly;
+  state.selected = 0;
+  return scene;
 }
 
-// Tell whoever is screenshotting that the scene has been drawn: two
-// animation frames, then 300 ms, then the flag goes up.
 export function markShotReady() {
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {

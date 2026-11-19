@@ -1,132 +1,98 @@
-// Cover Coast — the entrypoint.
+// main.ts — the Cover Coast entrypoint (Node 22, standard library only).
 //
-// Copies app/ and screenshots/ from this repository into the output
-// directory and writes dossier.json there, built by buildDossier from
-// vendor/makefun-app.ts. Run it from the repository root:
+// Hands the entry in: copies app/ and screenshots/ from beside this file
+// to the output directory (MAKEFUN_OUTPUT_DIR, default /output) and writes
+// /output/dossier.json with buildDossier from ./vendor/makefun-app.ts.
 //
-//   MAKEFUN_OUTPUT_DIR=out node main.ts
+// Preflight (the scorer's own caps, reference/gate.json): there must be
+// exactly 4 screenshots, each at most 256 KiB, and each one's long side at
+// most 1280 px with its short side at least 480 px — checked by parsing
+// the PNG IHDR header or the JPEG SOF0/SOF2 header. A bundle that would
+// be refused is never handed in: the run fails with a clear message.
 //
-// The output directory defaults to /output when MAKEFUN_OUTPUT_DIR is
-// not set. The program runs twice over the same inputs and writes the
-// same bytes both times.
-//
-// Preflight: the screenshots must be exactly 4, each at most 256 KiB,
-// each a readable PNG or JPEG with its long side at most 1280 px and
-// its short side at least 480 px — anything else fails loudly instead
-// of handing in a bundle the gate would refuse.
+//   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 
-import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-app.ts';
 
-const MAX_SCREENSHOTS = 4;
-const MAX_SCREENSHOT_BYTES = 256 * 1024;
-const MAX_SCREENSHOT_LONG_SIDE = 1280;
-const MIN_SCREENSHOT_SHORT_SIDE = 480;
-const TEXT_MAX_BYTES = 163840;
-const APP_MAX_FILES = 993;
-const APP_MAX_BYTES = 48 * 1024 * 1024;
-const APP_PATH_MAX_BYTES = 1000;
+const here = fileURLToPath(new URL('.', import.meta.url));
+const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 
-// Dimensions of a PNG from its IHDR chunk, or null when not a PNG.
-function pngDimensions(bytes: Buffer): { width: number; height: number } | null {
-  if (bytes.length < 24 || bytes[0] !== 0x89 || bytes[1] !== 0x50 || bytes[2] !== 0x4e || bytes[3] !== 0x47) {
-    return null;
-  }
-  return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+const MAX_SCREENSHOTS = 4;
+const MAX_SCREENSHOT_BYTES = 262144;
+const MAX_LONG_SIDE = 1280;
+const MIN_SHORT_SIDE = 480;
+
+function fail(message) {
+  throw new Error(`Cover Coast preflight: ${message}`);
 }
 
-// Dimensions of a JPEG by scanning its markers for a start-of-frame
-// segment, or null when not a JPEG or no frame is found.
-function jpegDimensions(bytes: Buffer): { width: number; height: number } | null {
-  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null;
+function pngSize(buffer) {
+  if (buffer.length < 24 || buffer.readUInt32BE(0) !== 0x89504e47) return null;
+  if (buffer.toString('ascii', 12, 16) !== 'IHDR') return null;
+  return { width: buffer.readUInt32BE(16), height: buffer.readUInt32BE(20) };
+}
+
+function jpegSize(buffer) {
+  if (buffer.length < 4 || buffer[0] !== 0xff || buffer[1] !== 0xd8) return null;
   let offset = 2;
-  while (offset + 9 < bytes.length) {
-    if (bytes[offset] !== 0xff) {
-      offset++;
-      continue;
-    }
-    const marker = bytes[offset + 1];
-    if (marker === 0xd9 || marker === 0xda) break;
-    const length = bytes.readUInt16BE(offset + 2);
-    if (length < 2) break;
+  while (offset + 9 < buffer.length) {
+    if (buffer[offset] !== 0xff) return null;
+    const marker = buffer[offset + 1];
+    if (marker === 0xd9 || marker === 0xda) return null;
+    const length = buffer.readUInt16BE(offset + 2);
     if (marker === 0xc0 || marker === 0xc2) {
-      return { width: bytes.readUInt16BE(offset + 7), height: bytes.readUInt16BE(offset + 5) };
+      return { width: buffer.readUInt16BE(offset + 7), height: buffer.readUInt16BE(offset + 5) };
     }
     offset += 2 + length;
   }
   return null;
 }
 
-async function checkScreenshots(screenshotsDir) {
-  const names = (await readdir(screenshotsDir)).filter((name) => !name.startsWith('.')).sort();
+function checkScreenshots(dir) {
+  if (!existsSync(dir)) fail('screenshots/ is missing');
+  const names = readdirSync(dir).filter((name) => !name.startsWith('.')).sort();
   if (names.length !== MAX_SCREENSHOTS) {
-    throw new Error(
-      `Preflight failed: screenshots/ holds ${names.length} image(s), expected exactly ${MAX_SCREENSHOTS}.`,
-    );
+    fail(`expected exactly ${MAX_SCREENSHOTS} screenshots, found ${names.length}`);
   }
   for (const name of names) {
-    const path = join(screenshotsDir, name);
-    const info = await stat(path);
-    if (!info.isFile()) {
-      throw new Error(`Preflight failed: screenshots/${name} is not a regular file.`);
+    const path = join(dir, name);
+    const size = statSync(path).size;
+    if (size > MAX_SCREENSHOT_BYTES) {
+      fail(`${name} is ${size} bytes, over the 256 KiB cap`);
     }
-    if (info.size > MAX_SCREENSHOT_BYTES) {
-      throw new Error(
-        `Preflight failed: screenshots/${name} is ${info.size} bytes, over the ${MAX_SCREENSHOT_BYTES} byte cap.`,
-      );
+    const buffer = readFileSync(path);
+    const dimensions = pngSize(buffer) ?? jpegSize(buffer);
+    if (!dimensions) fail(`${name} is neither a whole PNG nor a whole JPEG`);
+    const longSide = Math.max(dimensions.width, dimensions.height);
+    const shortSide = Math.min(dimensions.width, dimensions.height);
+    if (longSide > MAX_LONG_SIDE) {
+      fail(`${name} is ${dimensions.width}x${dimensions.height}, long side over ${MAX_LONG_SIDE}`);
     }
-    const bytes = await readFile(path);
-    const dims = pngDimensions(bytes) ?? jpegDimensions(bytes);
-    if (!dims) {
-      throw new Error(`Preflight failed: screenshots/${name} is not a readable PNG or JPEG.`);
-    }
-    const longSide = Math.max(dims.width, dims.height);
-    const shortSide = Math.min(dims.width, dims.height);
-    if (longSide > MAX_SCREENSHOT_LONG_SIDE) {
-      throw new Error(
-        `Preflight failed: screenshots/${name} is ${dims.width}x${dims.height}, ` +
-          `long side over the ${MAX_SCREENSHOT_LONG_SIDE} px cap.`,
-      );
-    }
-    if (shortSide < MIN_SCREENSHOT_SHORT_SIDE) {
-      throw new Error(
-        `Preflight failed: screenshots/${name} is ${dims.width}x${dims.height}, ` +
-          `short side under the ${MIN_SCREENSHOT_SHORT_SIDE} px minimum.`,
-      );
+    if (shortSide < MIN_SHORT_SIDE) {
+      fail(`${name} is ${dimensions.width}x${dimensions.height}, short side under ${MIN_SHORT_SIDE}`);
     }
   }
-  return names;
 }
 
-async function main() {
-  const repoRoot = dirname(fileURLToPath(import.meta.url));
-  const outDir = resolve(process.env.MAKEFUN_OUTPUT_DIR || '/output');
+checkScreenshots(join(here, 'screenshots'));
 
-  await rm(outDir, { recursive: true, force: true });
-  await mkdir(outDir, { recursive: true });
-  await cp(join(repoRoot, 'app'), join(outDir, 'app'), { recursive: true });
-  await cp(join(repoRoot, 'screenshots'), join(outDir, 'screenshots'), { recursive: true });
-
-  const shotNames = await checkScreenshots(join(outDir, 'screenshots'));
-
-  const dossier = buildDossier(outDir, {
-    text_max_bytes: TEXT_MAX_BYTES,
-    screenshots: { max: MAX_SCREENSHOTS, max_bytes: MAX_SCREENSHOT_BYTES },
-    app_max_files: APP_MAX_FILES,
-    app_max_bytes: APP_MAX_BYTES,
-    app_path_max_bytes: APP_PATH_MAX_BYTES,
-  });
-  await writeFile(join(outDir, 'dossier.json'), dossier);
-
-  process.stdout.write(
-    `Cover Coast: wrote ${outDir}/dossier.json (${dossier.length} bytes) ` +
-      `from app/ and ${shotNames.length} screenshots.\n`,
-  );
+mkdirSync(out, { recursive: true });
+cpSync(join(here, 'app'), join(out, 'app'), { recursive: true });
+mkdirSync(join(out, 'screenshots'), { recursive: true });
+if (existsSync(join(here, 'screenshots'))) {
+  cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
 }
 
-main().catch((error) => {
-  process.stderr.write(`Cover Coast failed: ${error.message}\n`);
-  process.exitCode = 1;
-});
+writeFileSync(
+  join(out, 'dossier.json'),
+  buildDossier(out, {
+    text_max_bytes: 163840,
+    screenshots: { max: 4, max_bytes: 262144 },
+    app_max_files: 993,
+    app_max_bytes: 50331648,
+    app_path_max_bytes: 1000,
+  }),
+);

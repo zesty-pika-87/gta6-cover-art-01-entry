@@ -1,17 +1,14 @@
-Font attribution
-=================
+Cover Coast — font attribution
+================================
 
-Cover Coast ships three fonts, all under the SIL Open Font License
-version 1.1 (https://openfontlicense.org):
+The three fonts bundled under app/fonts/ are released under the
+SIL Open Font License, Version 1.1, which allows them to be bundled,
+used and redistributed with this app:
 
-- Anton, by Vernon Adams — app/fonts/Anton-Regular.ttf
-  Used for the big poster title.
-- Pacifico, by Vernon Adams — app/fonts/Pacifico-Regular.ttf
-  Used for the script subtitle.
-- Bebas Neue, by Ryoichi Tsunekawa (Dharma Type) — app/fonts/BebasNeue-Regular.ttf
-  Used for the badge ribbon lettering.
+- Anton (Anton-Regular.ttf) — a bold condensed sans, used for the cover title.
+- Pacifico (Pacifico-Regular.ttf) — a script face, used for the subtitle.
+- Bebas Neue (BebasNeue-Regular.ttf) — a tall condensed sans, used for the badge ribbon.
 
-Each font is free to use, study, copy and redistribute under the terms
-of the SIL Open Font License, including use inside this app and in the
-covers it exports. No font file here comes from Rockstar Games or any
-game; all three are open-licensed display fonts.
+No Rockstar Games font, logo, wordmark or artwork is used in this app.
+The full SIL Open Font License text is available at
+https://openfontlicense.org/ (OFL-1.1).

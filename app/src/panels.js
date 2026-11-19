@@ -1,108 +1,74 @@
-// Cover Coast — the nine panel slots.
+// panels.js — the nine photo slots of Cover Coast.
 //
-// The cover always has nine slots, filled from the photos in row-major
-// order. With the six sample photos the default order is
-// 0, 1, 2, 3, 4, 5, 1, 2, 3, so every row and every column holds three
-// different photos and no two neighbours — across or down — are the same.
-// Photos that appear twice do so as a different framing: the first six
-// slots get a gentle zoom (1.00 to 1.12) and a small offset, while the
-// three repeat slots get a tight zoom (1.32 to 1.42) with a hard offset
-// to the opposite side, so the repeat reads as a close-up of another
-// part of the photo.
+// The default assignment spreads six photos over nine slots in row-major
+// order 0,1,2,3,4,5,1,2,3, so every row and every column holds three
+// different photos and no two neighbours (horizontal or vertical) match.
+// Each slot has its own crop: a gentle zoom (1.00-1.12) and a small offset
+// for first appearances, and a tight zoom (1.32-1.42) with a hard offset to
+// the opposite side for the repeats (slots 6-8), so a repeated photo reads
+// as a close-up of another part of the frame — slot 8, the bottom-right
+// corner, is offset to (-0.35, +0.25), a close-up of the smiling face and
+// hat rather than a headless torso.
 //
-// Shuffle rotates the assignment pattern instead of re-rolling it, so
-// the no-identical-neighbour rule survives every shuffle. A slot's crop
-// stays with the slot, not the photo.
+// Shuffle rotates the assignment pattern by 1..(photoCount - 1) instead of
+// scrambling it, so the no-equal-neighbours rule always survives; each
+// slot keeps its own crop.
 
-export const SLOT_COUNT = 9;
+export const PANEL_COUNT = 9;
 
-// The default order over six photos, row-major: rows [0,1,2], [3,4,5],
-// [1,2,3]; columns [0,3,1], [1,4,2], [2,5,3] — all different.
-export const DEFAULT_ORDER = [0, 1, 2, 3, 4, 5, 1, 2, 3];
+// The row-major photo pattern for nine slots over `photoCount` photos.
+export function basePattern(photoCount) {
+  const count = Math.max(1, photoCount);
+  return [0, 1, 2, 3, 4, 5, 1, 2, 3].map((index) => index % count);
+}
 
-const REPEAT_ZOOM = [1.32, 1.37, 1.42];
-const REPEAT_OFFSET = [
-  [-0.45, 0.3],
-  [0.45, -0.3],
-  [-0.35, 0.25],
+// Per-slot default crops: [zoom, offsetX, offsetY].
+const DEFAULT_CROPS = [
+  [1.05, 0.05, -0.04],
+  [1.10, -0.08, 0.03],
+  [1.02, 0.04, 0.06],
+  [1.08, -0.05, -0.06],
+  [1.12, 0.07, 0.02],
+  [1.04, -0.03, -0.05],
+  [1.38, 0.30, -0.20],
+  [1.34, -0.28, 0.22],
+  [1.42, -0.35, 0.25],
 ];
 
-// The crop a slot starts with: gentle for slots 0–5, a tight close-up
-// with a hard offset for the repeat slots 6–8.
-export function defaultSlotCrop(slotIndex) {
-  if (slotIndex >= 6) {
-    const repeat = slotIndex - 6;
-    return { zoom: REPEAT_ZOOM[repeat], ox: REPEAT_OFFSET[repeat][0], oy: REPEAT_OFFSET[repeat][1] };
-  }
-  const zoom = 1 + (slotIndex % 3) * 0.06;
-  const ox = (((slotIndex * 37) % 5) - 2) * 0.05;
-  const oy = (((slotIndex * 53) % 5) - 2) * 0.05;
-  return { zoom, ox, oy };
-}
-
-// An assignment with no identical neighbours, for any photo count.
-// Six photos use the exact default order; other counts are built by a
-// greedy rotation that skips whatever sits left or above.
-export function buildAssignment(photoCount) {
-  if (photoCount <= 0) return new Array(SLOT_COUNT).fill(0);
-  if (photoCount === 6) return [...DEFAULT_ORDER];
-  const order = [];
-  let pointer = 0;
-  for (let slot = 0; slot < SLOT_COUNT; slot++) {
-    const left = slot % 3 === 0 ? -1 : order[slot - 1];
-    const above = slot < 3 ? -1 : order[slot - 3];
-    let candidate = pointer % photoCount;
-    let tries = 0;
-    while (photoCount >= 3 && (candidate === left || candidate === above) && tries < photoCount) {
-      pointer++;
-      candidate = pointer % photoCount;
-      tries++;
-    }
-    order.push(candidate);
-    pointer++;
-  }
-  return order;
-}
-
-export function createSlots(photoCount) {
-  const order = buildAssignment(photoCount);
-  return order.map((photo, index) => ({
-    photo,
-    ...defaultSlotCrop(index),
+export function defaultSlots(photoCount) {
+  const pattern = basePattern(photoCount);
+  return pattern.map((photoIndex, slot) => ({
+    photoIndex,
+    zoom: DEFAULT_CROPS[slot][0],
+    offsetX: DEFAULT_CROPS[slot][1],
+    offsetY: DEFAULT_CROPS[slot][2],
   }));
 }
 
-export function assignPhoto(slots, slotIndex, photoIndex) {
-  if (!slots[slotIndex]) return;
-  slots[slotIndex].photo = photoIndex;
+// Rotate the assignment pattern by `shift` positions; crops stay put.
+export function shuffleSlots(slots, photoCount, shift) {
+  const count = Math.max(1, photoCount);
+  const step = ((shift % (count - 1 || 1)) + (count - 1 || 1)) % (count - 1 || 1) || 1;
+  const pattern = basePattern(count);
+  const rotated = pattern.map((_, i) => pattern[(i + step) % pattern.length]);
+  return slots.map((slot, i) => ({ ...slot, photoIndex: rotated[i] % count }));
 }
 
-export function setCrop(slot, zoom, ox, oy) {
-  if (!slot) return;
-  slot.zoom = Math.max(1, Math.min(4, zoom));
-  slot.ox = Math.max(-1, Math.min(1, ox));
-  slot.oy = Math.max(-1, Math.min(1, oy));
+// Point one slot at another photo, keeping its crop.
+export function assignPhoto(slots, slotIndex, photoIndex) {
+  return slots.map((slot, i) => (i === slotIndex ? { ...slot, photoIndex } : slot));
+}
+
+// Zoom is clamped to 1-4, offsets to -1..1.
+export function setCrop(slot, zoom, offsetX, offsetY) {
+  return {
+    ...slot,
+    zoom: Math.min(4, Math.max(1, zoom)),
+    offsetX: Math.min(1, Math.max(-1, offsetX)),
+    offsetY: Math.min(1, Math.max(-1, offsetY)),
+  };
 }
 
 export function resetCrop(slot) {
-  if (!slot) return;
-  slot.zoom = 1;
-  slot.ox = 0;
-  slot.oy = 0;
-}
-
-let shuffleStep = 0;
-
-// Rotate the assignment pattern by 1 to (photoCount - 1) places. A
-// rotation keeps every neighbour pair distinct, so the cover never ends
-// up with the same photo twice side by side. Crops stay on their slots.
-export function shuffleSlots(slots, photoCount) {
-  if (!slots.length || photoCount <= 1) return slots;
-  const step = 1 + (shuffleStep % Math.max(1, photoCount - 1));
-  shuffleStep++;
-  const photos = slots.map((slot) => slot.photo);
-  slots.forEach((slot, index) => {
-    slot.photo = photos[(index + step) % slots.length];
-  });
-  return slots;
+  return { ...slot, zoom: 1, offsetX: 0, offsetY: 0 };
 }

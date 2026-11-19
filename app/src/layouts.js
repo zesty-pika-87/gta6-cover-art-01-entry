@@ -1,166 +1,164 @@
-// Cover Coast — cover layouts.
+// layouts.js — the seven cover layouts of Cover Coast.
 //
-// Every layout is a pure function of the canvas size: it hands back the
-// photo panels, the title box and whether the title needs a scrim behind
-// it. All coordinates are pixels, so one description serves the preview
-// canvas and every export size alike.
+// Every layout is a pure function of the canvas size. It returns the panels
+// (photo boxes), the title box and whether the cover needs a scrim gradient
+// behind the lettering. Panel coordinates are absolute pixels; rotation is
+// radians around the panel centre; `frame` marks a polaroid-style panel.
 //
-// A panel is { x, y, w, h, rot, framed, dim }:
-//   x, y, w, h — the panel's box on the canvas
-//   rot        — rotation in radians about the panel's centre (0 = straight)
-//   framed     — draw it as a tilted polaroid snapshot, cream frame included
-//   dim        — dim the photo (a backdrop panel under other panels)
-// A title box is { x, y, w, h, align, band }:
-//   align — 'left' or 'center'
-//   band  — true when the title owns a band of its own at the foot;
-//           false when it sits on top of the photos over a scrim.
+// Gutter rule: the gap between panels is the larger of 2 px and 1.2% of the
+// canvas's short side, so the grid stays readable at every export size.
 
-export const LAYOUTS = [
-  { id: 'fullbleed', name: 'Full Bleed', blurb: 'One photo edge to edge, title low on the left.' },
-  { id: 'four', name: 'Four Panel', blurb: 'A 2 by 2 grid with a centred title at the foot.' },
-  { id: 'hero3', name: 'Hero + Three', blurb: 'A tall hero on the left, three stacked panels right.' },
-  { id: 'grid9', name: 'Nine Panel', blurb: 'A 3 by 3 grid over a bold title band.' },
-  { id: 'mosaic', name: 'Mosaic Nine', blurb: 'A tall hero plus cinematic strips, title band below.' },
-  { id: 'tilted', name: 'Tilted Snapshots', blurb: 'Polaroids scattered over a dimmed backdrop.' },
-  { id: 'story', name: 'Story Stack', blurb: 'A wide top panel, two below, title band at the foot.' },
-];
+export const LAYOUT_IDS = ['fullbleed', 'four', 'hero3', 'grid9', 'mosaic', 'tilted', 'story'];
 
-export function layoutById(id) {
-  return LAYOUTS.find((entry) => entry.id === id) || null;
+export const LAYOUT_NAMES = {
+  fullbleed: 'Full Bleed',
+  four: 'Four Panel',
+  hero3: 'Hero + Three',
+  grid9: 'Nine Panel',
+  mosaic: 'Mosaic Nine',
+  tilted: 'Tilted Snapshots',
+  story: 'Story Stack',
+};
+
+function gutterFor(width, height) {
+  return Math.max(2, 0.012 * Math.min(width, height));
 }
 
-// The gap between panels: at least 2 px, or 1.2% of the canvas's short side.
-export function panelGutter(width, height) {
-  return Math.max(2, Math.round(Math.min(width, height) * 0.012));
+function panel(x, y, w, h, rotation = 0, frame = false) {
+  return { x, y, w, h, rotation, frame };
 }
 
-function gridPanels(area, cols, rows, gutter) {
-  const cells = [];
-  const cellW = (area.w - gutter * (cols - 1)) / cols;
-  const cellH = (area.h - gutter * (rows - 1)) / rows;
-  for (let row = 0; row < rows; row++) {
-    for (let col = 0; col < cols; col++) {
-      cells.push({
-        x: area.x + col * (cellW + gutter),
-        y: area.y + row * (cellH + gutter),
-        w: cellW,
-        h: cellH,
-        rot: 0,
-        framed: false,
-      });
+function titleBox(x, y, w, h, align = 'center', band = false) {
+  return { x, y, w, h, align, band };
+}
+
+// One photo fills the whole canvas; the caption sits on a scrim at the foot.
+function fullBleed(width, height) {
+  return {
+    panels: [panel(0, 0, width, height)],
+    title: titleBox(0.06 * width, 0.66 * height, 0.88 * width, 0.28 * height, 'left', false),
+    scrim: true,
+  };
+}
+
+// Classic 2 x 2 grid; the caption floats centred on a scrim at the foot.
+function fourPanel(width, height, gap) {
+  const cellW = (width - gap) / 2;
+  const cellH = (height - gap) / 2;
+  return {
+    panels: [
+      panel(0, 0, cellW, cellH),
+      panel(cellW + gap, 0, cellW, cellH),
+      panel(0, cellH + gap, cellW, cellH),
+      panel(cellW + gap, cellH + gap, cellW, cellH),
+    ],
+    title: titleBox(0.05 * width, 0.70 * height, 0.90 * width, 0.24 * height, 'center', false),
+    scrim: true,
+  };
+}
+
+// A tall hero on the left (64% wide), three stacked panels on the right;
+// the caption lives in the hero's lower half.
+function heroThree(width, height, gap) {
+  const heroW = 0.64 * width;
+  const sideX = heroW + gap;
+  const sideW = width - sideX;
+  const cellH = (height - 2 * gap) / 3;
+  return {
+    panels: [
+      panel(0, 0, heroW, height),
+      panel(sideX, 0, sideW, cellH),
+      panel(sideX, cellH + gap, sideW, cellH),
+      panel(sideX, 2 * (cellH + gap), sideW, cellH),
+    ],
+    title: titleBox(0.04 * width, 0.72 * height, 0.58 * width, 0.22 * height, 'left', false),
+    scrim: true,
+  };
+}
+
+// Nine Panel: a 3 x 3 grid over the top 78%, then a solid title band
+// owning the bottom 22%. This is the default cover.
+function ninePanel(width, height, gap) {
+  const gridH = 0.78 * height;
+  const cellW = (width - 2 * gap) / 3;
+  const cellH = (gridH - 2 * gap) / 3;
+  const panels = [];
+  for (let row = 0; row < 3; row++) {
+    for (let col = 0; col < 3; col++) {
+      panels.push(panel(col * (cellW + gap), row * (cellH + gap), cellW, cellH));
     }
   }
-  return cells;
-}
-
-function titleBand(width, height, topFraction) {
   return {
-    x: 0,
-    y: height * topFraction,
-    w: width,
-    h: height * (1 - topFraction),
-    align: 'center',
-    band: true,
-  };
-}
-
-function fullBleedPanels(width, height) {
-  return {
-    panels: [{ x: 0, y: 0, w: width, h: height, rot: 0, framed: false }],
-    title: { x: width * 0.05, y: height * 0.66, w: width * 0.9, h: height * 0.28, align: 'left', band: false },
-    scrim: true,
-  };
-}
-
-function fourPanelPanels(width, height, gutter) {
-  return {
-    panels: gridPanels({ x: gutter, y: gutter, w: width - 2 * gutter, h: height - 2 * gutter }, 2, 2, gutter),
-    title: { x: width * 0.05, y: height * 0.7, w: width * 0.9, h: height * 0.28, align: 'center', band: false },
-    scrim: true,
-  };
-}
-
-function heroThreePanels(width, height, gutter) {
-  const heroW = width * 0.64 - gutter * 1.5;
-  const rightX = width * 0.64 + gutter * 0.5;
-  const rightW = width - gutter - rightX;
-  const right = gridPanels({ x: rightX, y: gutter, w: rightW, h: height - 2 * gutter }, 1, 3, gutter);
-  return {
-    panels: [{ x: gutter, y: gutter, w: heroW, h: height - 2 * gutter, rot: 0, framed: false }, ...right],
-    title: { x: gutter, y: height * 0.72, w: width * 0.58, h: height * 0.26, align: 'left', band: false },
-    scrim: true,
-  };
-}
-
-function ninePanelPanels(width, height, gutter) {
-  const panels = gridPanels(
-    { x: gutter, y: gutter, w: width - 2 * gutter, h: height * 0.78 - 2 * gutter },
-    3,
-    3,
-    gutter,
-  );
-  return { panels, title: titleBand(width, height, 0.78), scrim: false };
-}
-
-function mosaicNinePanels(width, height, gutter) {
-  const heroW = width * 0.4 - gutter * 1.5;
-  const rightX = width * 0.4 + gutter * 0.5;
-  const rightW = width - gutter - rightX;
-  const strips = gridPanels(
-    { x: rightX, y: gutter, w: rightW, h: height * 0.78 - 2 * gutter },
-    2,
-    4,
-    gutter,
-  );
-  const panels = [{ x: gutter, y: gutter, w: heroW, h: height * 0.78 - 2 * gutter, rot: 0, framed: false }, ...strips];
-  return { panels, title: titleBand(width, height, 0.78), scrim: false };
-}
-
-function tiltedSnapshotPanels(width, height) {
-  return {
-    panels: [
-      { x: 0, y: 0, w: width, h: height, rot: 0, framed: false, dim: true },
-      { x: width * 0.06, y: height * 0.05, w: width * 0.3, h: height * 0.34, rot: 0.07, framed: true },
-      { x: width * 0.3, y: height * 0.2, w: width * 0.42, h: height * 0.48, rot: -0.05, framed: true },
-      { x: width * 0.62, y: height * 0.52, w: width * 0.3, h: height * 0.34, rot: 0.08, framed: true },
-    ],
-    title: { x: width * 0.05, y: height * 0.76, w: width * 0.62, h: height * 0.22, align: 'left', band: false },
-    scrim: true,
-  };
-}
-
-function storyStackPanels(width, height, gutter) {
-  const bottomW = (width - 3 * gutter) / 2;
-  return {
-    panels: [
-      { x: gutter, y: gutter, w: width - 2 * gutter, h: height * 0.52 - 2 * gutter, rot: 0, framed: false },
-      { x: gutter, y: height * 0.53, w: bottomW, h: height * 0.2, rot: 0, framed: false },
-      { x: gutter + bottomW + gutter, y: height * 0.53, w: bottomW, h: height * 0.2, rot: 0, framed: false },
-    ],
-    title: titleBand(width, height, 0.76),
+    panels,
+    title: titleBox(0, gridH, width, height - gridH, 'center', true),
     scrim: false,
   };
 }
 
-// The layout for a canvas of this size. An unknown id falls back to Nine Panel.
-export function layoutPanels(id, width, height) {
-  const gutter = panelGutter(width, height);
-  switch (id) {
-    case 'fullbleed':
-      return fullBleedPanels(width, height);
-    case 'four':
-      return fourPanelPanels(width, height, gutter);
-    case 'hero3':
-      return heroThreePanels(width, height, gutter);
-    case 'grid9':
-      return ninePanelPanels(width, height, gutter);
-    case 'mosaic':
-      return mosaicNinePanels(width, height, gutter);
-    case 'tilted':
-      return tiltedSnapshotPanels(width, height);
-    case 'story':
-      return storyStackPanels(width, height, gutter);
-    default:
-      return ninePanelPanels(width, height, gutter);
+// Mosaic Nine: a tall hero on the left of the top 78% (40% wide) and,
+// on the right, two columns of four cinematic strips; title band at the foot.
+function mosaicNine(width, height, gap) {
+  const gridH = 0.78 * height;
+  const heroW = 0.40 * width;
+  const sideX = heroW + gap;
+  const sideW = width - sideX;
+  const stripW = (sideW - gap) / 2;
+  const stripH = (gridH - 3 * gap) / 4;
+  const panels = [panel(0, 0, heroW, gridH)];
+  for (let row = 0; row < 4; row++) {
+    for (let col = 0; col < 2; col++) {
+      panels.push(panel(sideX + col * (stripW + gap), row * (stripH + gap), stripW, stripH));
+    }
   }
+  return {
+    panels,
+    title: titleBox(0, gridH, width, height - gridH, 'center', true),
+    scrim: false,
+  };
+}
+
+// Tilted Snapshots: one dimmed full-bleed photo as the backdrop, three
+// framed polaroids tilted over it, caption at the lower left.
+function tiltedSnapshots(width, height) {
+  return {
+    panels: [
+      panel(0, 0, width, height),
+      panel(0.07 * width, 0.06 * height, 0.30 * width, 0.34 * height, 0.05, true),
+      panel(0.33 * width, 0.16 * height, 0.38 * width, 0.52 * height, -0.04, true),
+      panel(0.62 * width, 0.48 * height, 0.30 * width, 0.34 * height, 0.06, true),
+    ],
+    title: titleBox(0.06 * width, 0.76 * height, 0.88 * width, 0.20 * height, 'left', false),
+    scrim: true,
+  };
+}
+
+// Story Stack: a tall top panel (52%), two half-width panels below it
+// (20% tall, from 53%), then a title band from 76% to the foot.
+function storyStack(width, height, gap) {
+  const halfW = (width - gap) / 2;
+  return {
+    panels: [
+      panel(0, 0, width, 0.52 * height),
+      panel(0, 0.53 * height, halfW, 0.20 * height),
+      panel(halfW + gap, 0.53 * height, halfW, 0.20 * height),
+    ],
+    title: titleBox(0, 0.76 * height, width, 0.24 * height, 'center', true),
+    scrim: false,
+  };
+}
+
+const BUILDERS = {
+  fullbleed: (w, h, g) => fullBleed(w, h),
+  four: (w, h, g) => fourPanel(w, h, g),
+  hero3: (w, h, g) => heroThree(w, h, g),
+  grid9: (w, h, g) => ninePanel(w, h, g),
+  mosaic: (w, h, g) => mosaicNine(w, h, g),
+  tilted: (w, h, g) => tiltedSnapshots(w, h),
+  story: (w, h, g) => storyStack(w, h, g),
+};
+
+// Unknown layout ids fall back to the Nine Panel grid.
+export function getLayout(id, width, height) {
+  const build = BUILDERS[id] || BUILDERS.grid9;
+  return build(width, height, gutterFor(width, height));
 }

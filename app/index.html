@@ -4,81 +4,75 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Cover Coast — GTA-style Cover Maker</title>
-<meta name="description" content="Turn your own photos into GTA-style cover art: 7 layouts, 6 colour grades, 4 export sizes, PNG out. Runs offline, photos never leave your machine.">
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header class="topbar">
-  <div>
-    <h1>Cover Coast</h1>
-    <p>Your photos, turned into GTA-style cover art — 7 layouts, 6 grades, 4 export sizes.</p>
-  </div>
+<header class="page-head">
+  <h1>Cover Coast</h1>
+  <p>Turn your own photos into a GTA-style poster cover — 7 layouts, 6 colour grades, 4 export sizes. Your photos never leave this machine.</p>
 </header>
 
 <main class="editor">
-  <section class="controls" id="controls" aria-label="Cover controls">
-
-    <section class="card" aria-label="Photos">
+  <aside class="controls" aria-label="Cover controls">
+    <section class="card">
       <h2>1 · Photos</h2>
-      <label class="file-label" for="photoInput">Add your photos</label>
-      <input type="file" id="photoInput" accept="image/*" multiple>
-      <div class="thumbs" id="thumbs" aria-label="Loaded photos"></div>
-      <button type="button" class="ghost" id="shuffleBtn">Shuffle panels</button>
-      <p class="hint">Click a photo, then click a panel to place it. Drag a panel to move its photo, scroll over it to zoom.</p>
-      <p class="hint">Six sample photos are loaded for you: pier, boulevard, neon street, rooftop dusk, boardwalk day, rainy night.</p>
+      <label class="file-btn" for="photoInput">Add your photos…</label>
+      <input id="photoInput" type="file" accept="image/*" multiple hidden>
+      <div id="thumbs" class="thumbs" aria-label="Loaded photos"></div>
+      <button id="shuffleBtn" class="ghost" type="button">Shuffle photos</button>
+      <p class="hint">Click a photo, then click a panel to place it. Drag a panel to pan its photo, scroll to zoom. 6 sample photos are loaded for you.</p>
     </section>
 
-    <section class="card" aria-label="Selected panel">
+    <section class="card">
       <h2>2 · Selected panel</h2>
-      <label for="panelPhoto">Photo in this panel</label>
+      <p id="selectedLabel" class="hint">Panel 1 of 9</p>
+      <label class="field-label" for="panelPhoto">Photo in this panel</label>
       <select id="panelPhoto"></select>
-      <label for="zoomRange">Zoom <span class="range-note">1 – 4</span></label>
-      <input type="range" id="zoomRange" min="1" max="4" step="0.01" value="1">
-      <button type="button" class="ghost" id="resetCropBtn">Reset crop</button>
+      <label class="field-label" for="zoomRange">Zoom <span id="zoomValue">1.00×</span></label>
+      <input id="zoomRange" type="range" min="1" max="4" step="0.01" value="1">
+      <button id="resetCropBtn" class="ghost" type="button">Reset crop</button>
     </section>
 
-    <section class="card" aria-label="Words">
+    <section class="card">
       <h2>3 · Words</h2>
-      <label for="titleInput">Title</label>
-      <input type="text" id="titleInput" maxlength="40" value="Sunset Heist" autocomplete="off">
-      <label for="subtitleInput">Subtitle</label>
-      <input type="text" id="subtitleInput" maxlength="60" value="Vice City nights" autocomplete="off">
-      <label for="badgeInput">Badge</label>
-      <input type="text" id="badgeInput" maxlength="20" value="Neon Nights" autocomplete="off">
-      <label>Heat</label>
-      <div class="heat-stars" id="heatStars" role="group" aria-label="Heat rating"></div>
+      <label class="field-label" for="titleInput">Title</label>
+      <input id="titleInput" type="text" maxlength="40" value="Sunset Heist">
+      <label class="field-label" for="subtitleInput">Subtitle</label>
+      <input id="subtitleInput" type="text" maxlength="60" value="Vice City nights">
+      <label class="field-label" for="badgeInput">Badge</label>
+      <input id="badgeInput" type="text" maxlength="20" value="Neon Nights">
+      <label class="field-label">Heat</label>
+      <div id="heatStars" class="stars" role="group" aria-label="Heat rating"></div>
     </section>
 
-    <section class="card" aria-label="Layout">
+    <section class="card">
       <h2>4 · Layout</h2>
-      <div class="chips" id="layoutChips"></div>
+      <div id="layoutChips" class="chips"></div>
     </section>
 
-    <section class="card" aria-label="Grade">
+    <section class="card">
       <h2>5 · Grade</h2>
-      <div class="chips" id="gradeChips"></div>
-      <label for="intensityRange">Strength <span class="range-note">0 – 1</span></label>
-      <input type="range" id="intensityRange" min="0" max="1" step="0.05" value="0.85">
+      <div id="gradeChips" class="chips"></div>
+      <label class="field-label" for="intensityRange">Strength <span id="intensityValue">85%</span></label>
+      <input id="intensityRange" type="range" min="0" max="1" step="0.01" value="0.85">
     </section>
 
-    <section class="card" aria-label="Size and export">
+    <section class="card">
       <h2>6 · Size &amp; export</h2>
-      <div class="chips" id="sizeChips"></div>
+      <div id="sizeChips" class="chips"></div>
       <div class="row">
-        <button type="button" class="ghost" id="undoBtn">Undo</button>
-        <button type="button" class="ghost" id="redoBtn">Redo</button>
+        <button id="undoBtn" class="ghost" type="button" disabled>Undo</button>
+        <button id="redoBtn" class="ghost" type="button" disabled>Redo</button>
       </div>
-      <button type="button" class="primary" id="exportBtn">Export PNG</button>
-      <button type="button" class="ghost" id="exportAllBtn">Export all 4 sizes</button>
-      <p class="status" id="statusLine" aria-live="polite"></p>
+      <button id="exportBtn" class="primary" type="button">Export PNG</button>
+      <button id="exportAllBtn" class="ghost" type="button">Export all 4 sizes</button>
+      <p id="statusLine" class="status" role="status">Ready.</p>
     </section>
+  </aside>
 
-  </section>
-
-  <section class="stage-wrap" aria-label="Cover preview">
-    <canvas id="stage" width="720" height="720"></canvas>
-    <p class="stage-note">Click a panel to select it · drag to move the photo · scroll to zoom</p>
+  <section class="stage" aria-label="Cover preview">
+    <canvas id="coverCanvas" width="720" height="720"></canvas>
   </section>
 </main>
 
