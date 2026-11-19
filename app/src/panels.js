@@ -24,7 +24,7 @@ const REPEAT_ZOOM = [1.32, 1.37, 1.42];
 const REPEAT_OFFSET = [
   [-0.45, 0.3],
   [0.45, -0.3],
-  [-0.4, -0.35],
+  [-0.35, 0.25],
 ];
 
 // The crop a slot starts with: gentle for slots 0–5, a tight close-up

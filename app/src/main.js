@@ -122,7 +122,16 @@ function previewSize() {
 }
 
 export function render() {
-  const { width, height } = previewSize();
+  let width;
+  let height;
+  if (shotMode && document.body.classList.contains('shot-cover')) {
+    // A cover-only scene fills the screen: render at the viewport size
+    // so the screenshot is sharp at whatever size it is taken.
+    width = window.innerWidth;
+    height = window.innerHeight;
+  } else {
+    ({ width, height } = previewSize());
+  }
   if (stage.width !== width) stage.width = width;
   if (stage.height !== height) stage.height = height;
   renderCover(stageCtx, state, width, height);

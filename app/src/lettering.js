@@ -79,7 +79,7 @@ export function drawCoverTitle(ctx, text, box) {
   const label = (text || 'COVER').toUpperCase();
   const innerW = box.w * 0.96;
   const centreX = box.align === 'left' ? box.x + innerW / 2 : box.x + box.w / 2;
-  const startSize = Math.floor(box.h * 0.62);
+  const startSize = Math.floor(box.h * 0.58);
   const oneLineSize = fitLine(ctx, label, innerW, startSize);
 
   let lines;
@@ -100,8 +100,15 @@ export function drawCoverTitle(ctx, text, box) {
     lines = [label];
   }
 
-  const lineGap = fontSize * 0.18;
-  const blockHeight = lines.length * fontSize + (lines.length - 1) * lineGap;
+  // A two-line block must still fit its box: shrink both lines together
+  // until it does, down to the 10 px floor.
+  let lineGap = fontSize * 0.18;
+  let blockHeight = lines.length * fontSize + (lines.length - 1) * lineGap;
+  while (blockHeight > box.h && fontSize > 10) {
+    fontSize -= 2;
+    lineGap = fontSize * 0.18;
+    blockHeight = lines.length * fontSize + (lines.length - 1) * lineGap;
+  }
   const blockTop = box.y + (box.h - blockHeight) / 2;
   lines.forEach((line, index) => {
     const baselineY = blockTop + fontSize * (index + 1) + lineGap * index - fontSize * 0.12;
