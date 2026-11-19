@@ -5,8 +5,8 @@
 // v2: the title now wraps. A long title that would shrink below 34% of its
 // starting size splits into two balanced lines at a space instead of going
 // tiny — so a two-word cover name stays poster-big in the title band.
-// drawTitle returns { px, height } (the drawn block's size) instead of a bare
-// pixel size, and drawSubtitle positions itself from that block.
+// drawTitle returns { px, height, bottom } (the drawn block's size and its
+// bottom edge), and drawSubtitle positions itself from that block.
 
 function fitFont(ctx, text, maxW, startPx, family, weight = '') {
   let px = startPx;
@@ -49,11 +49,12 @@ function paintLine(ctx, line, x, y, px, grad, align) {
 /**
  * Big title: sunset gradient fill, dark outline, hard drop shadow.
  * Wraps to two lines when one line would go too small. Returns
- * { px, height } — the font size used and the drawn block's height.
+ * { px, height, bottom } — the font size used, the drawn block's height,
+ * and the y of the block's bottom edge, so the subtitle can sit below it.
  */
 export function drawTitle(ctx, text, box, { align = 'center' } = {}) {
   const t = (text || '').trim().toUpperCase();
-  if (!t) return { px: 0, height: 0 };
+  if (!t) return { px: 0, height: 0, bottom: box.y };
   const maxPx = box.h * 0.52;
   const grad = ctx.createLinearGradient(0, box.y, 0, box.y + maxPx);
   grad.addColorStop(0, '#ffe259');
@@ -69,13 +70,13 @@ export function drawTitle(ctx, text, box, { align = 'center' } = {}) {
   if (onePx >= maxPx * 0.34) {
     paintLine(ctx, t, x, box.y + onePx * 0.95, onePx, grad, align);
     ctx.restore();
-    return { px: onePx, height: onePx };
+    return { px: onePx, height: onePx, bottom: box.y + onePx };
   }
   const lines = splitTitle(t);
   if (!lines) {
     paintLine(ctx, t, x, box.y + onePx * 0.95, onePx, grad, align);
     ctx.restore();
-    return { px: onePx, height: onePx };
+    return { px: onePx, height: onePx, bottom: box.y + onePx };
   }
   const linePx = Math.min(
     fitFont(ctx, lines[0], box.w, maxPx * 0.92, 'Anton, "Arial Narrow", sans-serif'),
@@ -88,17 +89,17 @@ export function drawTitle(ctx, text, box, { align = 'center' } = {}) {
   paintLine(ctx, lines[0], x, y0, linePx, grad, align);
   paintLine(ctx, lines[1], x, y0 + linePx + gap, linePx, grad, align);
   ctx.restore();
-  return { px: linePx, height: total };
+  return { px: linePx, height: total, bottom: box.y + (box.h + total) / 2 };
 }
 
 /**
  * Script subtitle with a neon glow, drawn under the title block.
- * `title` is the { px, height } drawTitle returned.
+ * `title` is the { px, height, bottom } drawTitle returned.
  */
 export function drawSubtitle(ctx, text, box, title, align = 'center') {
   const t = (text || '').trim();
   const titlePx = title?.px ?? 0;
-  const titleH = title?.height ?? titlePx;
+  const titleBottom = title?.bottom ?? box.y + (title?.height ?? titlePx);
   if (!t || !titlePx) return 0;
   const px = fitFont(ctx, t, box.w * 0.9, Math.max(14, titlePx * 0.34), 'Pacifico, cursive');
   ctx.save();
@@ -109,11 +110,10 @@ export function drawSubtitle(ctx, text, box, title, align = 'center') {
   ctx.shadowBlur = px * 0.9;
   ctx.fillStyle = '#8ef6ff';
   const x = align === 'left' ? box.x : align === 'right' ? box.x + box.w : box.x + box.w / 2;
-  // Sit just under the title block, vertically centred in what is left of
-  // the band; a two-line title leaves less room, so the subtitle shrinks
-  // with the gap instead of colliding with the band's foot.
-  const top = box.y + titleH + (box.h - titleH) * 0.18;
-  const y = Math.min(top + px * 0.9, box.y + box.h - px * 0.15);
+  // Sit just under the title block's real bottom edge (a wrapped two-line
+  // title is vertically centred, so its bottom is well below box.y + px);
+  // never run past the band's foot.
+  const y = Math.min(titleBottom + px * 1.05, box.y + box.h - px * 0.2);
   ctx.fillText(t, x, y);
   ctx.fillText(t, x, y); // second pass strengthens the glow
   ctx.restore();

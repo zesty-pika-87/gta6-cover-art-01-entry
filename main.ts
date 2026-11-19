@@ -9,8 +9,10 @@
 // sunset-gradient Anton title lettering that wraps to two lines instead of shrinking, neon Pacifico subtitle, ribbon badge
 // and five-star heat meter, deterministic grain, sunburst and vignette, per-panel crop and zoom, shuffle, undo/redo, and PNG
 // export at 1080x1080, 1080x1350, 1920x1080 and 1080x1920, named after the cover title. Fonts are OFL files under app/fonts/;
-// the six sample photos (app/samples/) are free to use. Build your own GTA-style cover maker in its place, put your 3 or 4
-// PNG or JPEG screenshots in screenshots/ (the first by name is the cover — here the 1920x1080 nine-panel cover) and run it.
+// the six sample photos (app/samples/) are free to use, and the nine-panel grids give the three photos that must repeat
+// a much tighter, opposite-side crop (see panels.js) so a repeat reads as a different framing. Build your own GTA-style
+// cover maker in its place, put your 3 or 4 PNG or JPEG screenshots in screenshots/ (the first by name is the cover — here
+// the 1920x1080 nine-panel cover) and run it.
 //
 // Serve it locally with `node serve.ts`, then open http://localhost:8080.
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:

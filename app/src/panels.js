@@ -14,10 +14,13 @@
 // Every row and every column holds three different photos.
 const GRID9_PATTERN_6 = [0, 1, 2, 3, 4, 5, 1, 2, 3];
 // A gentle zoom per slot (1.00–1.12) plus a small offset, so repeated photos
-// are framed differently in each of their slots.
-const SLOT_ZOOM = [1.0, 1.08, 1.0, 1.12, 1.05, 1.0, 1.1, 1.06, 1.0];
-const SLOT_OX = [0, 0.12, -0.1, 0, -0.12, 0.1, 0, -0.08, 0.12];
-const SLOT_OY = [0, -0.1, 0.12, 0, 0.1, -0.12, 0.08, 0, -0.1];
+// are framed differently in each of their slots — and slots 6–8, which repeat
+// photos 1–3 in the nine-panel grids, get a much tighter zoom (1.32–1.42)
+// with a hard offset to the opposite side, so the repeat reads as a close-up
+// of a different part of the photo, not the same picture twice.
+const SLOT_ZOOM = [1.0, 1.08, 1.0, 1.12, 1.05, 1.0, 1.38, 1.32, 1.42];
+const SLOT_OX = [0, 0.12, -0.1, 0, -0.12, 0.1, -0.35, 0.3, -0.3];
+const SLOT_OY = [0, -0.1, 0.12, 0, 0.1, -0.12, -0.3, 0.35, 0.3];
 
 export function defaultPanels(photoCount) {
   const n = Math.max(1, photoCount || 1);

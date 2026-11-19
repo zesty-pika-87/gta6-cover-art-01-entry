@@ -7,7 +7,8 @@
 // read as separate photos instead of one blended field, the title band gets a
 // faint sunburst behind the halftone, and the subtitle now positions itself
 // from the title's real drawn block (drawTitle returns { px, height }) so a
-// wrapped two-line title never collides with it.
+// wrapped two-line title never collides with it (drawTitle returns the
+// title block's bottom edge for the subtitle to sit under).
 
 import { layoutPanels } from './layouts.js';
 import { applyGrade } from './grades.js';
