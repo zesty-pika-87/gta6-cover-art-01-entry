@@ -9,7 +9,7 @@ export const LAYOUTS = [
   { id: 'hero3', name: 'Hero + Three', slots: 4, blurb: 'Big hero left, three stacked right' },
   { id: 'grid9', name: 'Nine Panel', slots: 9, blurb: 'Cover grid with a title band' },
   { id: 'tilted', name: 'Tilted Snapshots', slots: 3, blurb: 'Polaroid snaps, askew' },
-  { id: 'story', name: 'Story Stack', slots: 4, blurb: 'Tall stack for 9:16 stories' },
+  { id: 'story', name: 'Story Stack', slots: 3, blurb: 'Tall stack for 9:16 stories' },
 ];
 
 /**
@@ -59,8 +59,10 @@ export function layoutPanels(id, W, H) {
       };
     }
     case 'grid9': {
+      // The nine panels fill the top 76%; the title band owns the foot, so no
+      // panel is hidden behind the lettering.
       const cw = (W - 2 * g) / 3;
-      const ch = (H - 2 * g) / 3;
+      const ch = (H * 0.76 - 2 * g) / 3;
       const panels = [];
       for (let r = 0; r < 3; r++) {
         for (let c = 0; c < 3; c++) {

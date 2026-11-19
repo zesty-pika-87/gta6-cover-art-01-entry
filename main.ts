@@ -4,8 +4,8 @@
 // /output/dossier.json, the summary the judge reads, with the vendored make.fun library.
 //
 // Cover Coast: a GTA-style cover maker. Six layouts (full-bleed, four-panel grid, hero-and-three, nine-panel grid
-// with a halftone title band, tilted polaroid snapshots, story stack), five gradient-map colour grades (Vice Sunset,
-// Neon Nights, Palm Dusk, Magenta Heat, Teal Noir), sunset-gradient Anton title lettering with a neon Pacifico
+// with a halftone title band below the panels, tilted polaroid snapshots, story stack), five gradient-map colour
+// grades (Vice Sunset, Neon Nights, Palm Dusk, Magenta Heat, Teal Noir), sunset-gradient Anton title lettering
 // subtitle, ribbon badge and five-star heat meter, grain and vignette, per-panel crop and zoom, undo/redo, and PNG
 // export at 1080x1080, 1080x1350, 1920x1080 and 1080x1920. Fonts are OFL files under app/fonts/; the four sample
 // photos (app/samples/) are free to use. Build your own GTA-style cover maker in its place, put your 3 or 4 PNG or

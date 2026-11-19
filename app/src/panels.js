@@ -6,7 +6,9 @@
 // cover looks varied even before the user touches anything.
 export function defaultPanels(photoCount) {
   const n = Math.max(1, photoCount || 1);
-  const pattern = [0, 1, 2, 3, 1, 0, 3, 2, 0];
+  // No two neighbours share a photo, so the grid reads as nine different
+  // moments even with only four photos loaded.
+  const pattern = [0, 1, 2, 3, 0, 1, 2, 3, 0];
   return Array.from({ length: 9 }, (_, i) => ({
     photo: pattern[i] % n,
     zoom: 1,
