@@ -2,11 +2,17 @@
 // halftone, sunset-gradient lettering, badge, heat meter, grain and vignette.
 // Photos are drawn to an offscreen art layer first so the grade colours only
 // the photography; lettering and effects are drawn on top, crisp.
+//
+// v2: every panel gets a thin dark keyline so the nine-panel and mosaic grids
+// read as separate photos instead of one blended field, the title band gets a
+// faint sunburst behind the halftone, and the subtitle now positions itself
+// from the title's real drawn block (drawTitle returns { px, height }) so a
+// wrapped two-line title never collides with it.
 
 import { layoutPanels } from './layouts.js';
 import { applyGrade } from './grades.js';
 import { drawTitle, drawSubtitle, drawBadge, drawHeat } from './lettering.js';
-import { grain, vignette, halftone, posterFrame } from './effects.js';
+import { grain, vignette, halftone, posterFrame, rays } from './effects.js';
 
 /** Cover-fits one photo into a panel rect, honouring its crop (zoom/offset). */
 function drawPhotoCover(ctx, img, p, slot) {
@@ -71,6 +77,15 @@ export function renderCover(canvas, s) {
       actx.fillRect(p.x, p.y, p.w, p.h);
     }
     actx.restore();
+    // Thin dark keyline around each panel: the grid reads as nine separate
+    // photos even where two neighbours are similarly coloured.
+    if (!p.frame && p.w > 0 && L.panels.length > 1) {
+      actx.save();
+      actx.strokeStyle = 'rgba(12,4,22,0.55)';
+      actx.lineWidth = Math.max(1, Math.round(Math.min(W, H) * 0.004));
+      actx.strokeRect(p.x, p.y, p.w, p.h);
+      actx.restore();
+    }
   });
   // The tilted layout's first panel is a dimmed full-bleed backdrop.
   if (s.layout === 'tilted') {
@@ -93,6 +108,7 @@ export function renderCover(canvas, s) {
     ctx.fillRect(t.x, t.y, t.w, t.h);
     ctx.fillStyle = 'rgba(255,122,61,0.9)';
     ctx.fillRect(t.x, t.y, t.w, Math.max(3, H * 0.006));
+    rays(ctx, { x: t.x, y: t.y, w: t.w, h: t.h });
     halftone(ctx, { x: t.x, y: t.y + t.h * 0.55, w: t.w, h: t.h * 0.45 });
   } else if (L.scrim) {
     const grad = ctx.createLinearGradient(0, t.y - H * 0.12, 0, H);
@@ -103,8 +119,8 @@ export function renderCover(canvas, s) {
   }
 
   // Lettering, badge, heat.
-  const titlePx = drawTitle(ctx, s.title, t, { align: t.align });
-  drawSubtitle(ctx, s.subtitle, t, titlePx, t.align);
+  const title = drawTitle(ctx, s.title, t, { align: t.align });
+  drawSubtitle(ctx, s.subtitle, t, title, t.align);
   drawBadge(ctx, s.badge, W, H);
   drawHeat(ctx, s.heat ?? 4, W, H);
 

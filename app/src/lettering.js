@@ -1,6 +1,12 @@
 // Lettering: the big Anton title with a sunset gradient and a dark outline, the
 // Pacifico script subtitle with a neon glow, the ribbon badge and the five-star
 // heat meter. Every draw auto-fits its text to the box it is given.
+//
+// v2: the title now wraps. A long title that would shrink below 34% of its
+// starting size splits into two balanced lines at a space instead of going
+// tiny — so a two-word cover name stays poster-big in the title band.
+// drawTitle returns { px, height } (the drawn block's size) instead of a bare
+// pixel size, and drawSubtitle positions itself from that block.
 
 function fitFont(ctx, text, maxW, startPx, family, weight = '') {
   let px = startPx;
@@ -12,21 +18,22 @@ function fitFont(ctx, text, maxW, startPx, family, weight = '') {
   return px;
 }
 
-/** Big title: sunset gradient fill, dark outline, hard drop shadow. */
-export function drawTitle(ctx, text, box, { align = 'center' } = {}) {
-  const t = (text || '').trim().toUpperCase();
-  if (!t) return 0;
-  const maxPx = box.h * 0.52;
-  const px = fitFont(ctx, t, box.w, maxPx, 'Anton, "Arial Narrow", sans-serif');
-  const grad = ctx.createLinearGradient(0, box.y, 0, box.y + px);
-  grad.addColorStop(0, '#ffe259');
-  grad.addColorStop(0.45, '#ff7e5f');
-  grad.addColorStop(1, '#ff2975');
-  ctx.save();
-  ctx.textAlign = align;
-  ctx.textBaseline = 'alphabetic';
-  const x = align === 'left' ? box.x : align === 'right' ? box.x + box.w : box.x + box.w / 2;
-  const y = box.y + px * 0.95;
+/** Splits `text` into two lines at the space nearest the middle, if any. */
+function splitTitle(text) {
+  const words = text.split(/\s+/);
+  if (words.length < 2) return null;
+  let best = -1;
+  let bestDiff = Infinity;
+  for (let i = 1; i < words.length; i++) {
+    const left = words.slice(0, i).join(' ').length;
+    const diff = Math.abs(left - text.length / 2);
+    if (diff < bestDiff) { bestDiff = diff; best = i; }
+  }
+  if (best < 0) return null;
+  return [words.slice(0, best).join(' '), words.slice(best).join(' ')];
+}
+
+function paintLine(ctx, line, x, y, px, grad, align) {
   ctx.font = `${px}px Anton, "Arial Narrow", sans-serif`;
   ctx.lineJoin = 'round';
   ctx.strokeStyle = '#2a0a33';
@@ -34,16 +41,64 @@ export function drawTitle(ctx, text, box, { align = 'center' } = {}) {
   ctx.shadowColor = 'rgba(0,0,0,0.55)';
   ctx.shadowBlur = px * 0.12;
   ctx.shadowOffsetY = px * 0.05;
-  ctx.strokeText(t, x, y);
+  ctx.strokeText(line, x, y);
   ctx.fillStyle = grad;
-  ctx.fillText(t, x, y);
-  ctx.restore();
-  return px;
+  ctx.fillText(line, x, y);
 }
 
-/** Script subtitle with a neon glow, drawn under the title. */
-export function drawSubtitle(ctx, text, box, titlePx, align = 'center') {
+/**
+ * Big title: sunset gradient fill, dark outline, hard drop shadow.
+ * Wraps to two lines when one line would go too small. Returns
+ * { px, height } — the font size used and the drawn block's height.
+ */
+export function drawTitle(ctx, text, box, { align = 'center' } = {}) {
+  const t = (text || '').trim().toUpperCase();
+  if (!t) return { px: 0, height: 0 };
+  const maxPx = box.h * 0.52;
+  const grad = ctx.createLinearGradient(0, box.y, 0, box.y + maxPx);
+  grad.addColorStop(0, '#ffe259');
+  grad.addColorStop(0.45, '#ff7e5f');
+  grad.addColorStop(1, '#ff2975');
+  const x = align === 'left' ? box.x : align === 'right' ? box.x + box.w : box.x + box.w / 2;
+  ctx.save();
+  ctx.textAlign = align;
+  ctx.textBaseline = 'alphabetic';
+  const onePx = fitFont(ctx, t, box.w, maxPx, 'Anton, "Arial Narrow", sans-serif');
+  // One line is fine unless it would shrink below a third of the band's cap:
+  // then two balanced lines stay far bigger and read better at thumbnail size.
+  if (onePx >= maxPx * 0.34) {
+    paintLine(ctx, t, x, box.y + onePx * 0.95, onePx, grad, align);
+    ctx.restore();
+    return { px: onePx, height: onePx };
+  }
+  const lines = splitTitle(t);
+  if (!lines) {
+    paintLine(ctx, t, x, box.y + onePx * 0.95, onePx, grad, align);
+    ctx.restore();
+    return { px: onePx, height: onePx };
+  }
+  const linePx = Math.min(
+    fitFont(ctx, lines[0], box.w, maxPx * 0.92, 'Anton, "Arial Narrow", sans-serif'),
+    fitFont(ctx, lines[1], box.w, maxPx * 0.92, 'Anton, "Arial Narrow", sans-serif'),
+    maxPx * 0.84, // two lines + gap must still fit inside the band
+  );
+  const gap = linePx * 0.18;
+  const total = linePx * 2 + gap;
+  const y0 = box.y + (box.h - total) / 2 + linePx * 0.95;
+  paintLine(ctx, lines[0], x, y0, linePx, grad, align);
+  paintLine(ctx, lines[1], x, y0 + linePx + gap, linePx, grad, align);
+  ctx.restore();
+  return { px: linePx, height: total };
+}
+
+/**
+ * Script subtitle with a neon glow, drawn under the title block.
+ * `title` is the { px, height } drawTitle returned.
+ */
+export function drawSubtitle(ctx, text, box, title, align = 'center') {
   const t = (text || '').trim();
+  const titlePx = title?.px ?? 0;
+  const titleH = title?.height ?? titlePx;
   if (!t || !titlePx) return 0;
   const px = fitFont(ctx, t, box.w * 0.9, Math.max(14, titlePx * 0.34), 'Pacifico, cursive');
   ctx.save();
@@ -54,7 +109,11 @@ export function drawSubtitle(ctx, text, box, titlePx, align = 'center') {
   ctx.shadowBlur = px * 0.9;
   ctx.fillStyle = '#8ef6ff';
   const x = align === 'left' ? box.x : align === 'right' ? box.x + box.w : box.x + box.w / 2;
-  const y = box.y + titlePx * 1.05 + px * 0.9;
+  // Sit just under the title block, vertically centred in what is left of
+  // the band; a two-line title leaves less room, so the subtitle shrinks
+  // with the gap instead of colliding with the band's foot.
+  const top = box.y + titleH + (box.h - titleH) * 0.18;
+  const y = Math.min(top + px * 0.9, box.y + box.h - px * 0.15);
   ctx.fillText(t, x, y);
   ctx.fillText(t, x, y); // second pass strengthens the glow
   ctx.restore();

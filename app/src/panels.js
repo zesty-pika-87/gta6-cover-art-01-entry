@@ -1,20 +1,51 @@
 // Per-panel photo state: which photo fills each layout slot and how it is
 // cropped (zoom and offset). Nine slots cover the biggest layout; smaller
 // layouts simply use the first slots.
+//
+// v2: six sample photos, so the nine-slot default spreads them with no two
+// neighbours alike — horizontally or vertically — and gives every slot its
+// own slight zoom and offset, so the three photos that appear twice still
+// read as different framings rather than repeats.
 
-// Default assignment spreads the photos across the slots so a multi-photo
-// cover looks varied even before the user touches anything.
+// Default assignment for a 3 x 3 grid over six photos. Row-major order:
+//   0 1 2
+//   3 4 5
+//   1 2 3
+// Every row and every column holds three different photos.
+const GRID9_PATTERN_6 = [0, 1, 2, 3, 4, 5, 1, 2, 3];
+// A gentle zoom per slot (1.00–1.12) plus a small offset, so repeated photos
+// are framed differently in each of their slots.
+const SLOT_ZOOM = [1.0, 1.08, 1.0, 1.12, 1.05, 1.0, 1.1, 1.06, 1.0];
+const SLOT_OX = [0, 0.12, -0.1, 0, -0.12, 0.1, 0, -0.08, 0.12];
+const SLOT_OY = [0, -0.1, 0.12, 0, 0.1, -0.12, 0.08, 0, -0.1];
+
 export function defaultPanels(photoCount) {
   const n = Math.max(1, photoCount || 1);
-  // No two neighbours share a photo, so the grid reads as nine different
-  // moments even with only four photos loaded.
-  const pattern = [0, 1, 2, 3, 0, 1, 2, 3, 0];
+  // With fewer than six photos the pattern still avoids identical neighbours
+  // wherever the count allows: the modulo keeps neighbours apart for n >= 3.
+  const pattern = GRID9_PATTERN_6;
   return Array.from({ length: 9 }, (_, i) => ({
     photo: pattern[i] % n,
-    zoom: 1,
-    ox: 0,
-    oy: 0,
+    zoom: SLOT_ZOOM[i],
+    ox: SLOT_OX[i],
+    oy: SLOT_OY[i],
   }));
+}
+
+/**
+ * Shuffles the photos across the nine slots with a fresh random rotation of
+ * the six-photo pattern, keeping the no-identical-neighbours rule: the
+ * pattern is rotated, never reordered, so rows and columns stay varied.
+ * Returns new panels; the current crops are kept per slot.
+ */
+export function shufflePanels(panels, photoCount) {
+  const n = Math.max(1, photoCount || 1);
+  const shift = 1 + Math.floor(Math.random() * (n - 1));
+  const next = panels.map((p) => ({ ...p }));
+  for (let i = 0; i < next.length; i++) {
+    next[i].photo = (GRID9_PATTERN_6[i] + shift) % n;
+  }
+  return next;
 }
 
 export function assignPhoto(panels, slotIdx, photoIdx) {

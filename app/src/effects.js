@@ -1,18 +1,36 @@
 // Poster effects: film grain, vignette and a halftone dot field for the title
 // band. All of them are resolution aware (they scale with the canvas) so the
 // small preview and the full-size export look like the same poster.
+//
+// v2: the grain is now deterministic — a seeded generator replaces
+// Math.random, so the same cover renders byte-identical grain in the preview
+// and in every export size. New: `rays`, a faint sunburst behind the title
+// band that lifts the lettering off the photo field.
+
+/** Tiny seeded PRNG (mulberry32) so grain is reproducible across renders. */
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 let noise = null;
 
 function noiseCanvas() {
   if (noise) return noise;
+  const rand = mulberry32(0xC0FFEE);
   noise = document.createElement('canvas');
   noise.width = 128;
   noise.height = 128;
   const c = noise.getContext('2d');
   const img = c.createImageData(128, 128);
   for (let i = 0; i < img.data.length; i += 4) {
-    const v = Math.floor(Math.random() * 256);
+    const v = Math.floor(rand() * 256);
     img.data[i] = v;
     img.data[i + 1] = v;
     img.data[i + 2] = v;
@@ -63,6 +81,30 @@ export function halftone(ctx, box, color = '#ff7a3d', alpha = 0.16) {
       ctx.arc(box.x + c * spacing + spacing / 2, box.y + r * spacing + spacing / 2, rad, 0, Math.PI * 2);
       ctx.fill();
     }
+  }
+  ctx.restore();
+}
+
+/**
+ * Faint sunburst rays fanning down from the top centre of a band, drawn
+ * under the title so the lettering reads against a lighter fan.
+ */
+export function rays(ctx, box, color = '#ff9d5c', alpha = 0.10) {
+  const cx = box.x + box.w / 2;
+  const cy = box.y - box.h * 0.35;
+  const reach = Math.hypot(box.w, box.h);
+  const count = 9;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = color;
+  for (let i = 0; i < count; i++) {
+    const a0 = Math.PI * (0.15 + (0.70 * i) / count);
+    const a1 = a0 + Math.PI * 0.035;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, reach, a0, a1);
+    ctx.closePath();
+    ctx.fill();
   }
   ctx.restore();
 }

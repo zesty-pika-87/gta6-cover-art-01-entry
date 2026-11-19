@@ -1,3 +1,12 @@
+Cover Coast font attribution
+============================
+The fonts shipped in this folder are all licensed under the SIL Open Font
+License, Version 1.1 (full text below):
+  - Anton-Regular.ttf — Anton, Copyright 2020 The Anton Project Authors
+  - Pacifico-Regular.ttf — Pacifico, Copyright 2018 The Pacifico Project Authors
+  - BebasNeue-Regular.ttf — Bebas Neue, Copyright 2019 The Bebas Neue Project Authors
+No Rockstar logo, wordmark, artwork or font is used anywhere in this app.
+
 Copyright 2020 The Anton Project Authors (https://github.com/googlefonts/AntonFont.git)
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.

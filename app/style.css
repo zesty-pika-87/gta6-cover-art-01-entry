@@ -37,6 +37,16 @@ button:disabled { opacity: 0.4; cursor: default; }
 #cover { max-width: 100%; max-height: calc(100vh - 48px); box-shadow: 0 12px 44px rgba(0, 0, 0, 0.55); border-radius: 4px; cursor: grab; }
 #cover:active { cursor: grabbing; }
 #status { margin: 0; min-height: 1.2em; color: #8ef6ff; font-size: 13px; }
+.sample-note { color: #c9b8d6; }
+#shuffle { align-self: flex-start; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid #8ef6ff; outline-offset: 2px; }
+.thumbs button:focus-visible { border-color: #8ef6ff; }
+@media (max-width: 900px) {
+  .app { flex-direction: column; padding: 16px; gap: 16px; }
+  .controls { width: 100%; }
+  .stage { position: static; width: 100%; }
+  #cover { max-height: none; }
+}
 body.shot-cover .controls { display: none; }
 body.shot-cover .app { padding: 0; }
 body.shot-cover .stage { position: static; }

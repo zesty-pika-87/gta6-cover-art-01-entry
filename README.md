@@ -14,17 +14,25 @@ exported as a PNG to share.
 
 - **Any photo** — add your own photos, fill several panels with one photo or
   several, and crop and position each panel by dragging it and scrolling to zoom.
-- **The art** — six layouts (Full Bleed, Four Panel, Hero + Three, Nine Panel
-  with a halftone title band, Tilted Snapshots, Story Stack), five gradient-map
-  grades (Vice Sunset, Neon Nights, Palm Dusk, Magenta Heat, Teal Noir),
-  sunset-gradient Anton title lettering, a neon Pacifico subtitle, a ribbon
-  badge and a five-star heat meter, plus grain and vignette.
+  Shuffle deals a fresh spread of photos across the panels without putting the
+  same photo twice next to itself.
+- **The art** — seven layouts (Full Bleed, Four Panel, Hero + Three, Nine Panel
+  with a halftone title band, Mosaic Nine with a tall hero and eight strips,
+  Tilted Snapshots, Story Stack), six gradient-map grades (Vice Sunset, Neon
+  Nights, Palm Dusk, Magenta Heat, Teal Noir, Golden Hour), sunset-gradient
+  Anton title lettering that wraps to two lines instead of shrinking, a neon
+  Pacifico subtitle, a ribbon badge and a five-star heat meter, plus
+  deterministic grain, a sunburst behind the title band, and vignette.
 - **Fast and easy** — a photo to an exported PNG in a few clicks, at
   1080 x 1080, 1080 x 1350, 1920 x 1080 and 1080 x 1920 (story), one at a time
-  or all four at once. Undo and redo included.
+  or all four at once (with progress). Exported files are named after the
+  cover title, e.g. `cover-sunset-heist-1920x1080.png`. Undo and redo included.
 - **Original** — no Rockstar logo, wordmark, artwork or font. The fonts are
-  OFL files shipped under `app/fonts/` (Anton, Pacifico, Bebas Neue). The four
-  sample photos in `app/samples/` are free to use.
+  OFL files shipped under `app/fonts/` (Anton, Pacifico, Bebas Neue — see
+  `app/fonts/OFL.txt` for attribution). The six sample photos in
+  `app/samples/` are free to use: pier, boulevard, neon street, rooftop dusk,
+  boardwalk day and rainy night. The nine-panel grids spread all six with no
+  two neighbours alike, and repeated photos get different crops.
 
 ## Run it
 
@@ -40,6 +48,11 @@ node serve.ts
 ```sh
 mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 ```
+
+Screenshots are taken from fixed scenes in `shots.json` (`?shot=cover`,
+`?shot=editor`, `?shot=cover-portrait`, `?shot=cover-square`); the first
+screenshot is the 1920 x 1080 nine-panel cover, the shot the judge sees
+largest.
 
 ## License
 

@@ -1,14 +1,16 @@
 // Wires the Cover Coast editor: photos in, layout and grade picked, words typed,
 // cover exported. Drag a panel to move its photo, scroll to zoom it, click a
-// thumbnail to fill the selected panel. A `?shot=` query sets up a fixed scene
-// for a screenshot instead (./shots.js).
+// thumbnail to fill the selected panel, or Shuffle for a fresh photo spread
+// across the panels. A `?shot=` query sets up a fixed scene for a screenshot
+// instead (./shots.js). Six sample photos ship with the app; any of your own
+// photos can be added on top.
 
 import { renderCover } from './cover.js';
 import { LAYOUTS, layoutPanels } from './layouts.js';
 import { GRADES } from './grades.js';
 import { SIZES, exportCover, exportAll } from './export.js';
-import { defaultPanels, assignPhoto, setCrop, resetCrop } from './panels.js';
-import { applyShot, markShotReady } from './shots.js';
+import { defaultPanels, assignPhoto, setCrop, resetCrop, shufflePanels } from './panels.js';
+import { applyShot, markShotReady, orderPhotos } from './shots.js';
 
 const canvas = document.getElementById('cover');
 const status = document.getElementById('status');
@@ -20,6 +22,8 @@ const SAMPLES = [
   ['boulevard', 'Boulevard'],
   ['neon', 'Neon street'],
   ['rooftop', 'Rooftop dusk'],
+  ['boardwalk', 'Boardwalk day'],
+  ['rain', 'Rainy night'],
 ];
 
 let state = {
@@ -104,6 +108,7 @@ function chipGroup(el, items, current, onPick) {
     const b = document.createElement('button');
     b.type = 'button';
     b.textContent = item.label ?? item.name;
+    b.title = item.blurb ?? '';
     b.dataset.id = item.id;
     b.classList.toggle('active', item.id === current);
     b.addEventListener('click', () => { pushHistory(); onPick(item.id); render(); });
@@ -228,8 +233,8 @@ export function loadImage(url) {
   });
 }
 
-async function addPhoto(img, name) {
-  state.photos.push({ img, name });
+async function addPhoto(img, name, key) {
+  state.photos.push({ img, name, key: key ?? name });
 }
 
 document.getElementById('photo').addEventListener('change', async (e) => {
@@ -315,6 +320,15 @@ canvas.addEventListener('wheel', (e) => {
   syncControls();
 }, { passive: false });
 
+// ---- shuffle: a fresh photo spread across the panels, same no-repeat rule ----
+document.getElementById('shuffle').addEventListener('click', () => {
+  pushHistory();
+  state.panels = shufflePanels(state.panels, state.photos.length);
+  render();
+  syncPanelSelect();
+  status.textContent = 'Photos shuffled';
+});
+
 // ---- export ----
 document.getElementById('export').addEventListener('click', async () => {
   const size = SIZES.find((s) => s.id === state.sizeId) || SIZES[0];
@@ -323,8 +337,10 @@ document.getElementById('export').addEventListener('click', async () => {
   status.textContent = `Saved ${name}`;
 });
 document.getElementById('export-all').addEventListener('click', async () => {
-  status.textContent = 'Rendering 4 sizes…';
-  const names = await exportAll(state);
+  status.textContent = 'Rendering 1 of 4…';
+  const names = await exportAll(state, (done, total) => {
+    status.textContent = done < total ? `Rendering ${done + 1} of ${total}…` : 'Saving…';
+  });
   status.textContent = `Saved ${names.join(', ')}`;
 });
 
@@ -347,9 +363,12 @@ async function boot() {
   for (const [file, name] of SAMPLES) {
     try {
       const img = await loadImage(`samples/${file}.jpg`);
-      await addPhoto(img, name);
+      await addPhoto(img, name, file);
     } catch { /* a missing sample just leaves fewer photos */ }
   }
+  // A shot scene may lead with a different sample (boardwalk day, rainy
+  // night); reorder the loaded photos before the panels are assigned.
+  if (state.sampleOrder) state.photos = orderPhotos(state.photos, state.sampleOrder);
   state.panels = defaultPanels(state.photos.length);
   syncThumbs();
   syncControls();

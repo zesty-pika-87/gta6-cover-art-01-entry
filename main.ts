@@ -3,25 +3,36 @@
 // request), and the program hands it in. It copies app/ and screenshots/ from beside this file to /output and writes
 // /output/dossier.json, the summary the judge reads, with the vendored make.fun library.
 //
-// Cover Coast: a GTA-style cover maker. Six layouts (full-bleed, four-panel grid, hero-and-three, nine-panel grid
-// with a halftone title band below the panels, tilted polaroid snapshots, story stack), five gradient-map colour
-// grades (Vice Sunset, Neon Nights, Palm Dusk, Magenta Heat, Teal Noir), sunset-gradient Anton title lettering
-// subtitle, ribbon badge and five-star heat meter, grain and vignette, per-panel crop and zoom, undo/redo, and PNG
-// export at 1080x1080, 1080x1350, 1920x1080 and 1080x1920. Fonts are OFL files under app/fonts/; the four sample
-// photos (app/samples/) are free to use. Build your own GTA-style cover maker in its place, put your 3 or 4 PNG or
-// JPEG screenshots in screenshots/ (the first by name is the cover) and run it.
+// Cover Coast v2: a GTA-style cover maker. Seven layouts (full-bleed, four-panel grid, hero-and-three, nine-panel grid
+// with a halftone title band below the panels, mosaic nine with a tall hero and eight strips, tilted polaroid snapshots,
+// story stack), six gradient-map colour grades (Vice Sunset, Neon Nights, Palm Dusk, Magenta Heat, Teal Noir, Golden Hour),
+// sunset-gradient Anton title lettering that wraps to two lines instead of shrinking, neon Pacifico subtitle, ribbon badge
+// and five-star heat meter, deterministic grain, sunburst and vignette, per-panel crop and zoom, shuffle, undo/redo, and PNG
+// export at 1080x1080, 1080x1350, 1920x1080 and 1080x1920, named after the cover title. Fonts are OFL files under app/fonts/;
+// the six sample photos (app/samples/) are free to use. Build your own GTA-style cover maker in its place, put your 3 or 4
+// PNG or JPEG screenshots in screenshots/ (the first by name is the cover — here the 1920x1080 nine-panel cover) and run it.
 //
 // Serve it locally with `node serve.ts`, then open http://localhost:8080.
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 
-import { cpSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-app.ts';
 
 const here = fileURLToPath(new URL('.', import.meta.url));
 const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+
+// Preflight: the entry is refused without 4 screenshots inside the caps, so
+// fail loudly here instead of handing in a bundle the scorer would reject.
+const shotDir = join(here, 'screenshots');
+const shots = readdirSync(shotDir).filter((f) => /\.(png|jpe?g)$/i.test(f)).sort();
+if (shots.length !== 4) throw new Error(`expected 4 screenshots, found ${shots.length}: ${shots.join(', ')}`);
+for (const f of shots) {
+  const size = statSync(join(shotDir, f)).size;
+  if (size > 262144) throw new Error(`screenshot ${f} is ${size} bytes, over the 256 KiB cap`);
+}
 
 mkdirSync(out, { recursive: true });
 cpSync(join(here, 'app'), join(out, 'app'), { recursive: true });

@@ -2,12 +2,19 @@
 // from the canvas size so one layout serves every export size (square, portrait,
 // landscape, story). Gutters are thin dark bands; the title block either floats
 // over a scrim at the foot or sits in its own halftone band.
+//
+// v2: seven layouts. `mosaic9` is new — a tall hero on the left with eight
+// cinematic strips on the right, so a nine-panel cover can show six different
+// photos without the 3 x 3 repetition. `grid9` now gives the panels the top
+// 78% (was 76%) and a slimmer 22% title band, so the lettering sits tighter
+// under a denser photo field.
 
 export const LAYOUTS = [
   { id: 'fullbleed', name: 'Full Bleed', slots: 1, blurb: 'One photo, edge to edge' },
   { id: 'grid4', name: 'Four Panel', slots: 4, blurb: 'Classic 2 x 2 poster grid' },
   { id: 'hero3', name: 'Hero + Three', slots: 4, blurb: 'Big hero left, three stacked right' },
   { id: 'grid9', name: 'Nine Panel', slots: 9, blurb: 'Cover grid with a title band' },
+  { id: 'mosaic9', name: 'Mosaic Nine', slots: 9, blurb: 'Tall hero + eight strips, six photos' },
   { id: 'tilted', name: 'Tilted Snapshots', slots: 3, blurb: 'Polaroid snaps, askew' },
   { id: 'story', name: 'Story Stack', slots: 3, blurb: 'Tall stack for 9:16 stories' },
 ];
@@ -59,17 +66,43 @@ export function layoutPanels(id, W, H) {
       };
     }
     case 'grid9': {
-      // The nine panels fill the top 76%; the title band owns the foot, so no
-      // panel is hidden behind the lettering.
+      // The nine panels fill the top 78%; the title band owns the foot, so no
+      // panel is hidden behind the lettering. With six sample photos the
+      // default assignment (see panels.js) never puts the same photo twice
+      // next to itself, so the grid reads as nine different moments.
       const cw = (W - 2 * g) / 3;
-      const ch = (H * 0.76 - 2 * g) / 3;
+      const ch = (H * 0.78 - 2 * g) / 3;
       const panels = [];
       for (let r = 0; r < 3; r++) {
         for (let c = 0; c < 3; c++) {
           panels.push({ x: c * (cw + g), y: r * (ch + g), w: cw, h: ch, rot: 0, frame: false });
         }
       }
-      return { panels, title: band(H * 0.76, H * 0.24), scrim: false };
+      return { panels, title: band(H * 0.78, H * 0.22), scrim: false };
+    }
+    case 'mosaic9': {
+      // Mosaic nine: a tall hero panel takes the left 40% of the top 78%,
+      // the right 60% is eight cinematic strips (2 columns x 4 rows), and
+      // the title band owns the foot. Nine slots, six photos, no two
+      // neighbours alike — the densest cover in the app.
+      const top = H * 0.78;
+      const heroW = Math.round(W * 0.40);
+      const stripW = (W - heroW - 2 * g) / 2;
+      const stripH = (top - 3 * g) / 4;
+      const panels = [{ x: 0, y: 0, w: heroW, h: top, rot: 0, frame: false }];
+      for (let r = 0; r < 4; r++) {
+        for (let c = 0; c < 2; c++) {
+          panels.push({
+            x: heroW + g + c * (stripW + g),
+            y: r * (stripH + g),
+            w: stripW,
+            h: stripH,
+            rot: 0,
+            frame: false,
+          });
+        }
+      }
+      return { panels, title: band(top, H - top), scrim: false };
     }
     case 'tilted':
       return {

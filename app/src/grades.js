@@ -2,27 +2,36 @@
 // of shadow -> midtone -> highlight colours, which is what gives a photo the
 // Vice City sunset or neon-night look in one pass. The lookup tables are built
 // once per grade and cached.
+//
+// v2: six grades — Golden Hour joins the five v1 grades with a warm amber ramp
+// for the new boardwalk daylight photo. The ramp interpolation is now a
+// smoothstep instead of linear, so midtones roll off without banding, and
+// every grade carries a one-line blurb for the editor chips' tooltips.
 
 export const GRADES = [
   {
-    id: 'vice', name: 'Vice Sunset',
-    stops: [[0, '#160a24'], [0.22, '#5b1a5e'], [0.48, '#c22769'], [0.74, '#ff7a3d'], [1, '#ffd319']],
+    id: 'vice', name: 'Vice Sunset', blurb: 'Purple shadows, hot pink mids, sunset gold',
+    stops: [[0, '#160a24'], [0.22, '#5b1a5e'], [0.48, '#c22769'], [0.74, '#ff8a3d'], [1, '#ffd319']],
   },
   {
-    id: 'neon', name: 'Neon Nights',
+    id: 'neon', name: 'Neon Nights', blurb: 'Deep blue shadows, violet and cyan glow',
     stops: [[0, '#04041a'], [0.25, '#2b1a6e'], [0.5, '#7b2ff7'], [0.78, '#22d3ee'], [1, '#a5f3fc']],
   },
   {
-    id: 'palm', name: 'Palm Dusk',
+    id: 'palm', name: 'Palm Dusk', blurb: 'Dusky blue into warm orange and pale gold',
     stops: [[0, '#0e1a2b'], [0.25, '#27395e'], [0.5, '#e8734a'], [0.78, '#f2a65a'], [1, '#f7d774']],
   },
   {
-    id: 'magenta', name: 'Magenta Heat',
+    id: 'magenta', name: 'Magenta Heat', blurb: 'Wine shadows, hot magenta, soft pink highs',
     stops: [[0, '#20001f'], [0.25, '#6d0f4e'], [0.5, '#d81159'], [0.78, '#ff5d8f'], [1, '#ffb3c6']],
   },
   {
-    id: 'teal', name: 'Teal Noir',
+    id: 'teal', name: 'Teal Noir', blurb: 'Near-black teal, deep green, pale aqua highs',
     stops: [[0, '#02141a'], [0.25, '#07333d'], [0.5, '#0e7c7b'], [0.78, '#43b8a2'], [1, '#c9f2e4']],
+  },
+  {
+    id: 'gold', name: 'Golden Hour', blurb: 'Warm amber for daylight: brown shadows, gold highs',
+    stops: [[0, '#1a0f02'], [0.25, '#7a3b12'], [0.5, '#e8862e'], [0.78, '#ffc53d'], [1, '#fff3b0']],
   },
 ];
 
@@ -49,7 +58,9 @@ export function gradeLUT(id) {
       if (t >= stops[s][0] && t <= stops[s + 1][0]) { a = stops[s]; z = stops[s + 1]; break; }
     }
     const span = z[0] - a[0] || 1;
-    const f = Math.min(1, Math.max(0, (t - a[0]) / span));
+    // Smoothstep eases the blend between stops so gradients stay band-free.
+    const lin = Math.min(1, Math.max(0, (t - a[0]) / span));
+    const f = lin * lin * (3 - 2 * lin);
     r[i] = Math.round(a[1][0] + (z[1][0] - a[1][0]) * f);
     g[i] = Math.round(a[1][1] + (z[1][1] - a[1][1]) * f);
     b[i] = Math.round(a[1][2] + (z[1][2] - a[1][2]) * f);
