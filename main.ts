@@ -7,12 +7,14 @@
 // Preflight (the scorer's own caps, reference/gate.json): there must be
 // exactly 4 screenshots, each at most 256 KiB, and each one's long side at
 // most 1280 px with its short side at least 480 px — checked by parsing
-// the PNG IHDR header or the JPEG SOF0/SOF2 header. A bundle that would
-// be refused is never handed in: the run fails with a clear message.
+// the PNG IHDR header or the JPEG SOF0/SOF2 header. The copied app/ tree
+// is checked too (no symlinks, at most 993 entries and 48 MiB, index.html
+// at most 1 MiB). A bundle that would be refused is never handed in: the
+// run fails with a clear message.
 //
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts
 
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildDossier } from './vendor/makefun-app.ts';
@@ -77,6 +79,36 @@ function checkScreenshots(dir) {
   }
 }
 
+// The scorer's app_files row, checked on the copied tree that is actually
+// handed in: plain files and directories only (no symlinks), at most 993
+// entries and 48 MiB in all, every path at most 1000 bytes, and
+// app/index.html a regular file of at most 1 MiB.
+function checkAppTree(dir) {
+  const MAX_APP_FILES = 993;
+  const MAX_APP_BYTES = 50331648;
+  const MAX_INDEX_BYTES = 1048576;
+  let entries = 0;
+  let bytes = 0;
+  const walk = (current) => {
+    for (const name of readdirSync(current)) {
+      const path = join(current, name);
+      const info = lstatSync(path);
+      entries += 1;
+      if (Buffer.byteLength(path, 'utf8') > 1000) fail(`path over 1000 bytes: ${path}`);
+      if (info.isSymbolicLink()) fail(`symlink in app/: ${path}`);
+      if (info.isDirectory()) walk(path);
+      else if (info.isFile()) bytes += info.size;
+      else fail(`not a plain file or directory: ${path}`);
+    }
+  };
+  walk(dir);
+  if (entries > MAX_APP_FILES) fail(`app/ has ${entries} entries, over the 993 cap`);
+  if (bytes > MAX_APP_BYTES) fail(`app/ is ${bytes} bytes, over the 48 MiB cap`);
+  const index = join(dir, 'index.html');
+  if (!existsSync(index) || !statSync(index).isFile()) fail('app/index.html is missing');
+  if (statSync(index).size > MAX_INDEX_BYTES) fail('app/index.html is over the 1 MiB cap');
+}
+
 checkScreenshots(join(here, 'screenshots'));
 
 mkdirSync(out, { recursive: true });
@@ -85,6 +117,7 @@ mkdirSync(join(out, 'screenshots'), { recursive: true });
 if (existsSync(join(here, 'screenshots'))) {
   cpSync(join(here, 'screenshots'), join(out, 'screenshots'), { recursive: true });
 }
+checkAppTree(join(out, 'app'));
 
 writeFileSync(
   join(out, 'dossier.json'),
