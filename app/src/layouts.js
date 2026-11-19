@@ -54,7 +54,7 @@ export function layoutPanels(id, W, H) {
           { x: hw + g, y: rh + g, w: rw, h: rh, rot: 0, frame: false },
           { x: hw + g, y: 2 * (rh + g), w: rw, h: rh, rot: 0, frame: false },
         ],
-        title: foot(H * 0.70, H * 0.24, 'left'),
+        title: { x: W * 0.04, y: H * 0.72, w: W * 0.58, h: H * 0.22, align: 'left', band: false },
         scrim: true,
       };
     }

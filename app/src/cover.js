@@ -104,8 +104,7 @@ export function renderCover(canvas, s) {
 
   // Lettering, badge, heat.
   const titlePx = drawTitle(ctx, s.title, t, { align: t.align });
-  if (t.band) drawSubtitle(ctx, s.subtitle, t, titlePx);
-  else drawSubtitle(ctx, s.subtitle, { x: t.x, y: t.y, w: t.w, h: t.h }, titlePx);
+  drawSubtitle(ctx, s.subtitle, t, titlePx, t.align);
   drawBadge(ctx, s.badge, W, H);
   drawHeat(ctx, s.heat ?? 4, W, H);
 

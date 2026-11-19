@@ -42,20 +42,21 @@ export function drawTitle(ctx, text, box, { align = 'center' } = {}) {
 }
 
 /** Script subtitle with a neon glow, drawn under the title. */
-export function drawSubtitle(ctx, text, box, titlePx) {
+export function drawSubtitle(ctx, text, box, titlePx, align = 'center') {
   const t = (text || '').trim();
   if (!t || !titlePx) return 0;
   const px = fitFont(ctx, t, box.w * 0.9, Math.max(14, titlePx * 0.34), 'Pacifico, cursive');
   ctx.save();
   ctx.font = `${px}px Pacifico, cursive`;
-  ctx.textAlign = 'center';
+  ctx.textAlign = align;
   ctx.textBaseline = 'alphabetic';
   ctx.shadowColor = '#ff2fb3';
   ctx.shadowBlur = px * 0.9;
   ctx.fillStyle = '#8ef6ff';
+  const x = align === 'left' ? box.x : align === 'right' ? box.x + box.w : box.x + box.w / 2;
   const y = box.y + titlePx * 1.05 + px * 0.9;
-  ctx.fillText(t, box.x + box.w / 2, y);
-  ctx.fillText(t, box.x + box.w / 2, y); // second pass strengthens the glow
+  ctx.fillText(t, x, y);
+  ctx.fillText(t, x, y); // second pass strengthens the glow
   ctx.restore();
   return px;
 }
